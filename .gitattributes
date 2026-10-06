@@ -1,0 +1,13 @@
+# Finales de línea: git guarda LF en el repositorio y usa el final nativo al extraer.
+* text=auto
+
+# Los scripts de shell necesitan LF: con CRLF fallan en Linux con «bad interpreter».
+*.sh text eol=lf
+
+# PowerShell 5.1 maneja mejor CRLF y estos scripts solo se usan en Windows.
+*.ps1 text eol=crlf
+
+# Binarios: que git no intente convertirlos ni mostrar diferencias.
+*.png binary
+*.ico binary
+*.exe binary

@@ -1,0 +1,62 @@
+[package]
+name = "wodw"
+version = "0.1.0"
+edition = "2021"
+authors = ["celtidcs"]
+description = "Navegador de escritorio de solo lectura para la red Tor, con Tor incluido y cada página procesada en un proceso aislado y desechable."
+# GPL-3.0 o posterior, la misma licencia que el resto de proyectos públicos del autor.
+license = "GPL-3.0-or-later"
+repository = "https://github.com/celtidcs/WoDW"
+readme = "README.md"
+
+[dependencies]
+tokio = { version = "1.38", features = ["full"] }
+arti-client = { version = "0.47", default-features = false, features = ["tokio", "native-tls", "compression", "onion-service-client", "pt-client", "vanguards"] }
+tor-rtcompat = { version = "0.47", features = ["tokio"] }
+tor-config = "0.47"
+tor-guardmgr = { version = "0.47", features = ["vanguards"] }
+# No se usa directamente: activa SQLite embebido (`bundled`) para la caché de directorio de
+# Arti (tor-dirmgr). Sin ella el binario exige un sqlite3 del sistema y no sería portable.
+rusqlite = { version = "0.40", features = ["bundled"] }
+zeroize = { version = "1.8", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+postcard = { version = "1.1", default-features = false, features = ["use-std"] }
+thiserror = "1.0"
+rand = "0.8"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+egui = "0.36"
+eframe = "0.36"
+toml = "0.8"
+url = "2.5"
+native-tls = "0.2"
+tokio-native-tls = "0.3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Isolation",
+    "Win32_System_Memory",
+    "Win32_System_SystemServices",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+landlock = "0.4"
+seccompiler = "0.5"
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[dev-dependencies]
+# Solo para la barrera tests/parche_saturating_time.rs (Arti ya la usa como dependencia indirecta).
+saturating-time = "0.5"
+
+# TEMPORAL: corrige el bloqueo de Arti en Windows (Arti #2678 y #2726). Retirar en cuanto Arti
+# publique la corrección; ver parches/saturating-time/PARCHE-WODW.md.
+[patch.crates-io]
+saturating-time = { path = "parches/saturating-time" }

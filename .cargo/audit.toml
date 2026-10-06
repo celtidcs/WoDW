@@ -1,0 +1,7 @@
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071: Marvin Attack en crate `rsa` transitiva de `arti-client` (The Tor Project).
+    # Requerida internamente por `tor-llcrypto` para compatibilidad de consenso Tor legado.
+    # No existe versión corregida aguas arriba por The Tor Project. WoDW opera sobre Onion v3 (Ed25519).
+    "RUSTSEC-2023-0071",
+]

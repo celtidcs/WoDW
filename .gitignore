@@ -1,0 +1,21 @@
+# Compilación de Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Registros y temporales
+*.log
+tmp/
+
+# Sistema operativo
+Thumbs.db
+[Dd]esktop.ini
+.DS_Store
+
+# Editores
+.idea/
+.vscode/
+*.swp
+
+# Configuración local del usuario (el ejemplo versionado es wodw.ejemplo.toml)
+wodw.toml

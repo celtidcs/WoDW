@@ -1,0 +1,114 @@
+# Configuración de WoDW — valores por defecto documentados.
+#
+# Copia este archivo como `wodw.toml` junto al ejecutable (o indica otra ruta con
+# `--config <ruta>`) y cambia lo que necesites. Las claves que no aparezcan toman
+# el valor por defecto. Una clave mal escrita o un valor inválido impide arrancar,
+# para que nunca se ignore un ajuste de seguridad en silencio.
+
+[red]
+# Tamaño máximo del cuerpo de una respuesta (10 MiB).
+limite_cuerpo_bytes = 10485760
+# Tamaño máximo del bloque de cabeceras HTTP (64 KiB).
+limite_cabeceras_bytes = 65536
+# Longitud máxima de una línea de tamaño de chunk (1 KiB).
+limite_linea_chunk_bytes = 1024
+# Plazo para abrir un flujo Tor; los servicios .onion pueden tardar.
+tiempo_espera_conexion_ms = 120000
+# Plazo máximo de silencio entre dos lecturas.
+tiempo_espera_lectura_ms = 60000
+# Retardo aleatorio previo a cada petición, contra la correlación temporal.
+jitter_min_ms = 20
+jitter_max_ms = 120
+# Redirecciones HTTP seguidas como máximo.
+max_redirecciones = 5
+# Cabeceras idénticas a Tor Browser (declara Windows en todas las plataformas).
+user_agent = "Mozilla/5.0 (Windows NT 10.0; rv:128.0) Gecko/20100101 Firefox/128.0"
+accept_language = "en-US,en;q=0.5"
+# true = solo se permiten destinos .onion.
+solo_onion = false
+
+[tor]
+# Defensa contra el descubrimiento de guardias: "lite", "full" o "disabled".
+vanguardias = "lite"
+# Puentes para ocultar al proveedor de internet que se usa Tor. Se obtienen en
+# https://bridges.torproject.org. Ejemplo:
+# puentes = ["obfs4 192.0.2.1:443 HUELLA cert=… iat-mode=0"]
+puentes = []
+# Binarios de transporte necesarios para los puentes (lyrebird, snowflake-client…):
+# [[tor.transportes]]
+# protocolos = ["obfs4"]
+# ruta = "/usr/bin/lyrebird"
+# argumentos = []
+transportes = []
+# Directorios de Arti; si se omiten se usan los predeterminados de Arti.
+# ruta_estado = "datos/arti/estado"
+# ruta_cache = "datos/arti/cache"
+
+[motores]
+predeterminado = "Ahmia"
+
+[[motores.lista]]
+nombre = "Ahmia"
+descripcion = "Motor curado con filtrado activo anti-abuso"
+plantilla = "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion/search/?q={consulta}"
+
+[[motores.lista]]
+nombre = "Torch"
+descripcion = "Motor sin moderación ni filtros editoriales"
+plantilla = "http://xmh57jrknzkhv6y3ls3ubitzfqnkrwxhopf5aygthi7d6rfdvgchu6ad.onion/cgi-bin/omega/omega?P={consulta}"
+
+[[motores.lista]]
+nombre = "DuckDuckGo Onion"
+descripcion = "Búsqueda en web superficial a través de la red Onion (versión HTML sin JavaScript)"
+plantilla = "https://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion/html/?q={consulta}"
+
+[worker]
+# Tamaño máximo de un mensaje entre Maestro y Worker (16 MiB).
+limite_mensaje_ipc_bytes = 16777216
+# Dimensiones y memoria máximas de una imagen antes de decodificarla.
+ancho_maximo_imagen = 4096
+alto_maximo_imagen = 4096
+memoria_maxima_imagen_bytes = 134217728
+# Corte del filtro paso bajo de audio contra balizas ultrasónicas.
+frecuencia_corte_audio_hz = 18000
+# Plazo para que un Worker entregue su respuesta.
+tiempo_espera_ms = 15000
+
+[ids]
+capacidad_canal = 256
+capacidad_difusion = 128
+limite_historial = 50
+# Contramedidas automáticas: rotación ante amenazas, pánico ante compromiso.
+mitigacion_automatica = true
+# Cada cuánto se verifican los señuelos.
+intervalo_verificacion_ms = 2000
+
+[panico]
+# Pulsaciones consecutivas de Esc que disparan el pánico y ventana entre ellas.
+pulsaciones = 3
+ventana_ms = 1500
+# Tras purgar, cerrar la aplicación al instante.
+abortar_proceso = true
+
+[canarios]
+# Escriben señuelos en disco: desactivados salvo que el directorio esté en RAM.
+habilitados = false
+# directorio = "/tmp/wodw-canarios"
+
+[interfaz]
+ancho_inicial = 1000.0
+alto_inicial = 800.0
+# Letterboxing: el área de contenido se redondea a múltiplos de estos pasos.
+incremento_horizontal = 200.0
+incremento_vertical = 100.0
+ancho_minimo = 600.0
+alto_minimo = 400.0
+ancho_maximo = 1400.0
+alto_maximo = 1000.0
+longitud_titulo_pestana = 20
+
+[automatizacion]
+# Bloquear durante la sesión los sitios que provoquen un incidente.
+bloquear_hosts_hostiles = true
+# Purgar pestañas e historial tras estos minutos sin actividad (0 = nunca).
+minutos_inactividad_purga = 30
