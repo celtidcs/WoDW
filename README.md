@@ -106,12 +106,18 @@ Todos los detalles están en la [arquitectura](documentacion/arquitectura.md).
 
 ## Usarla
 
-Descarga `wodw.exe` desde [Releases](https://github.com/celtidcs/WoDW/releases) y ábrelo. La barra
-de abajo te dirá cuándo está conectado a Tor. Cómo navegar, qué hace sola y cómo configurarla está
-en el [manual de uso](documentacion/manual-de-uso.md).
+En [Releases](https://github.com/celtidcs/WoDW/releases) hay dos descargas:
 
-Para ajustar algo, copia `wodw.ejemplo.toml` como `wodw.toml` junto al ejecutable: cada opción
-está explicada dentro.
+- **Windows** (10 u 11, 64 bits): `wodw-0.1.0-windows-x86_64.exe`. Ábrelo y listo; no se instala.
+- **Linux** (64 bits): `wodw-0.1.0-linux-x86_64.tar.gz`. Descomprímelo y ejecuta `./wodw`. Necesita
+  glibc 2.39 o posterior y OpenSSL 3, es decir, Debian 13, Ubuntu 24.04, Tails 7 o más recientes.
+  En distribuciones más antiguas, compílalo tú (abajo se explica cómo).
+
+`SHA256SUMS.txt` trae las huellas de cada archivo para comprobar que la descarga está íntegra.
+
+La barra de abajo te dirá cuándo está conectado a Tor. Cómo navegar, qué hace sola y cómo
+configurarla está en el [manual de uso](documentacion/manual-de-uso.md). Para ajustar algo, copia
+`wodw.ejemplo.toml` como `wodw.toml` junto al ejecutable: cada opción está explicada dentro.
 
 ## Compilar y ejecutar
 
