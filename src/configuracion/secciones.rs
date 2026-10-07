@@ -19,6 +19,9 @@ pub struct ConfiguracionRedHttp {
     /// Tamaño máximo del cuerpo de una respuesta. 10 MiB cubre páginas y
     /// medios estáticos habituales sin permitir agotar la memoria.
     pub limite_cuerpo_bytes: usize,
+    /// Tamaño máximo de un audio o un vídeo descargado. 256 MiB caben en
+    /// memoria sin riesgo y cubren vídeos de varios minutos.
+    pub limite_cuerpo_medios_bytes: usize,
     /// Tamaño máximo del bloque de cabeceras HTTP (64 KiB, como servidores comunes).
     pub limite_cabeceras_bytes: usize,
     /// Longitud máxima de una línea de tamaño de chunk. El RFC 9112 solo exige
@@ -46,6 +49,7 @@ impl Default for ConfiguracionRedHttp {
     fn default() -> Self {
         Self {
             limite_cuerpo_bytes: 10 * MIB,
+            limite_cuerpo_medios_bytes: 256 * MIB,
             limite_cabeceras_bytes: 64 * KIB,
             limite_linea_chunk_bytes: KIB,
             tiempo_espera_conexion_ms: 120_000,
@@ -163,29 +167,177 @@ impl Default for ConfiguracionMotores {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ConfiguracionWorker {
-    /// Tamaño máximo de un mensaje IPC (16 MiB: cuerpo máximo de red más margen de serialización).
+    /// Tamaño máximo de un mensaje del Worker al Maestro. 48 MiB: un fotograma
+    /// 4K en RGBA (33,2 MB) más el audio de su bloque y margen.
     pub limite_mensaje_ipc_bytes: usize,
-    /// Ancho máximo de imagen aceptado antes de decodificar (protección contra bombas).
-    pub ancho_maximo_imagen: u32,
-    /// Alto máximo de imagen aceptado antes de decodificar.
-    pub alto_maximo_imagen: u32,
+    /// Tamaño máximo de una orden del Maestro al Worker (lleva el archivo
+    /// entero): el mayor límite de descarga más 1 MiB de margen.
+    pub limite_orden_ipc_bytes: usize,
+    /// Lado largo máximo de una imagen o un vídeo, en cualquier orientación.
+    /// Se comprueba en la cabecera **antes** de decodificar (bombas de
+    /// descompresión). 3840 px: 4K UHD.
+    pub lado_largo_maximo_px: u32,
+    /// Lado corto máximo de una imagen o un vídeo (2160 px, 4K UHD).
+    pub lado_corto_maximo_px: u32,
     /// Memoria máxima que el decodificador de imágenes puede reservar.
     pub memoria_maxima_imagen_bytes: u64,
-    /// Frecuencia de corte del filtro paso bajo de audio (Hz).
+    /// Tope de caracteres del texto visible de una página. Un millón equivale a
+    /// un libro largo; por encima solo sirve para agotar memoria o la interfaz.
+    pub max_caracteres_texto: usize,
+    /// Tope de imágenes, audios y vídeos listados de una página: 200 cubren
+    /// cualquier galería razonable sin inflar la respuesta.
+    pub max_medios_por_pagina: usize,
+    /// Frecuencia de corte del filtro paso bajo de audio (Hz): por encima de
+    /// 18 kHz casi nadie oye nada y ahí viajan las balizas ultrasónicas.
     pub frecuencia_corte_audio_hz: u32,
+    /// Pico máximo del audio en milésimas de la escala completa. 891 ‰ ≈ −1 dBFS:
+    /// margen frente a la saturación y protección de oídos y altavoces.
+    pub pico_maximo_audio_por_mil: u16,
+    /// Duración aproximada de cada bloque de un medio (ms). Medio segundo
+    /// equilibra la latencia al pulsar «Reproducir» y el número de mensajes.
+    pub duracion_bloque_ms: u32,
+    /// Memoria máxima de un sub-Worker (CA-C3). Un archivo malicioso que
+    /// intente agotar la memoria mata solo al Worker. 2 GiB caben un medio de
+    /// 256 MiB, los búferes de un vídeo 4K y la pila de su hilo con holgura.
+    pub memoria_maxima_worker_bytes: u64,
     /// Plazo máximo para que un sub-Worker entregue su respuesta.
     pub tiempo_espera_ms: u64,
+}
+
+impl ConfiguracionWorker {
+    /// `true` si una imagen o un fotograma de `ancho`×`alto` cabe en el límite
+    /// de resolución, en cualquier orientación (horizontal o vertical).
+    pub fn admite_resolucion(&self, ancho: u32, alto: u32) -> bool {
+        ancho.max(alto) <= self.lado_largo_maximo_px && ancho.min(alto) <= self.lado_corto_maximo_px
+    }
+
+    /// Bytes RGBA del mayor fotograma o imagen admitido por el límite de
+    /// resolución: lo mínimo que tiene que caber en una respuesta del Worker.
+    pub fn bytes_fotograma_maximo(&self) -> u64 {
+        u64::from(self.lado_largo_maximo_px)
+            * u64::from(self.lado_corto_maximo_px)
+            * crate::ipc::mensajes::BYTES_POR_PIXEL_RGBA as u64
+    }
+
+    /// Valor absoluto máximo de una muestra PCM de 16 bits según
+    /// `pico_maximo_audio_por_mil` (que la validación acota entre 1 y 1000).
+    pub fn pico_maximo_muestra(&self) -> i16 {
+        let pico = i32::from(i16::MAX) * i32::from(self.pico_maximo_audio_por_mil)
+            / i32::from(crate::unidades::POR_MIL);
+        i16::try_from(pico).unwrap_or(i16::MAX)
+    }
 }
 
 impl Default for ConfiguracionWorker {
     fn default() -> Self {
         Self {
-            limite_mensaje_ipc_bytes: 16 * MIB,
-            ancho_maximo_imagen: 4096,
-            alto_maximo_imagen: 4096,
+            limite_mensaje_ipc_bytes: 48 * MIB,
+            limite_orden_ipc_bytes: 257 * MIB,
+            lado_largo_maximo_px: 3840,
+            lado_corto_maximo_px: 2160,
             memoria_maxima_imagen_bytes: 128 * MIB as u64,
+            max_caracteres_texto: 1_000_000,
+            max_medios_por_pagina: 200,
             frecuencia_corte_audio_hz: 18_000,
+            pico_maximo_audio_por_mil: 891,
+            duracion_bloque_ms: 500,
+            memoria_maxima_worker_bytes: 2 * 1024 * MIB as u64,
             tiempo_espera_ms: 15_000,
+        }
+    }
+}
+
+/// Parámetros de la reproducción de audio y vídeo en el Maestro.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ConfiguracionReproduccion {
+    /// Audio que se pide por adelantado al Worker (ms). Dos segundos absorben
+    /// los altibajos de la decodificación sin acumular memoria.
+    pub bufer_audio_ms: u64,
+    /// Fotogramas que se guardan por adelantado. Ocho fotogramas 4K ocupan
+    /// unos 265 MB; es el tope de memoria de vídeo en el Maestro.
+    pub max_fotogramas_en_bufer: usize,
+    /// Volumen inicial en porcentaje (el volumen solo atenúa: máximo 100).
+    pub volumen_inicial_por_ciento: u32,
+}
+
+impl Default for ConfiguracionReproduccion {
+    fn default() -> Self {
+        Self {
+            bufer_audio_ms: 2_000,
+            max_fotogramas_en_bufer: 8,
+            volumen_inicial_por_ciento: 80,
+        }
+    }
+}
+
+/// Qué guarda el registro de la sesión.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContenidoRegistro {
+    /// Solo sucesos de seguridad, sin páginas visitadas (lo más discreto).
+    #[default]
+    Seguridad,
+    /// Además, cada página abierta y cada reproducción.
+    Completo,
+}
+
+/// Cuándo llega el registro al disco.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GuardadoRegistro {
+    /// Solo al pulsar «Guardar registro» (lo más discreto).
+    #[default]
+    Manual,
+    /// Al cerrar WoDW con normalidad, en `ruta_automatica`.
+    Automatico,
+}
+
+/// Registro de la sesión.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ConfiguracionRegistro {
+    /// Contenido inicial (se cambia desde la interfaz).
+    pub contenido: ContenidoRegistro,
+    /// Guardado inicial (se cambia desde la interfaz).
+    pub guardado: GuardadoRegistro,
+    /// Archivo del guardado automático y propuesta del manual; `None` usa
+    /// `wodw-registro.txt` junto al ejecutable.
+    pub ruta_automatica: Option<std::path::PathBuf>,
+    /// Entradas que se conservan en memoria (las más antiguas se descartan):
+    /// 5000 cubren una sesión larga con pocos cientos de kilobytes.
+    pub max_entradas: usize,
+}
+
+impl Default for ConfiguracionRegistro {
+    fn default() -> Self {
+        Self {
+            contenido: ContenidoRegistro::default(),
+            guardado: GuardadoRegistro::default(),
+            ruta_automatica: None,
+            max_entradas: 5_000,
+        }
+    }
+}
+
+/// Aviso de versión nueva (consulta a GitHub por Tor al arrancar).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ConfiguracionActualizaciones {
+    /// Si se consulta al conectar con Tor. Solo avisa: nunca descarga nada.
+    pub comprobar_al_iniciar: bool,
+    /// API de la última publicación del repositorio oficial.
+    pub url_api: String,
+    /// Prefijo de la página de una publicación (se le añade `vX.Y.Z`).
+    pub url_publicaciones: String,
+}
+
+impl Default for ConfiguracionActualizaciones {
+    fn default() -> Self {
+        Self {
+            comprobar_al_iniciar: true,
+            url_api: "https://api.github.com/repos/celtidcs/WoDW/releases/latest".to_string(),
+            url_publicaciones: "https://github.com/celtidcs/WoDW/releases/tag/".to_string(),
         }
     }
 }
@@ -273,6 +425,11 @@ pub struct ConfiguracionInterfaz {
     pub alto_maximo: f32,
     /// Caracteres visibles del título de una pestaña antes de truncarlo.
     pub longitud_titulo_pestana: usize,
+    /// Ancho mínimo de la ventana (puntos): por debajo, el campo de dirección
+    /// se quedaba sin sitio entre los botones (medido: 11 puntos a 480).
+    pub ancho_minimo_ventana: f32,
+    /// Alto mínimo de la ventana (puntos).
+    pub alto_minimo_ventana: f32,
 }
 
 impl Default for ConfiguracionInterfaz {
@@ -287,6 +444,8 @@ impl Default for ConfiguracionInterfaz {
             ancho_maximo: 1400.0,
             alto_maximo: 1000.0,
             longitud_titulo_pestana: 20,
+            ancho_minimo_ventana: 800.0,
+            alto_minimo_ventana: 500.0,
         }
     }
 }

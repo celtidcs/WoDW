@@ -15,6 +15,7 @@ pub use respuesta::RespuestaHttp;
 
 use crate::configuracion::ConfiguracionRedHttp;
 use crate::error::{ErrorApp, Resultado};
+use crate::ipc::mensajes::FamiliaMedio;
 use cuerpo::{leer_cuerpo, LimitesCuerpo};
 use lector::LectorAcotado;
 use rand::Rng;
@@ -62,8 +63,18 @@ where
         .leer_hasta(FIN_CABECERAS, red.limite_cabeceras_bytes, "cabeceras HTTP")
         .await?;
     let cabecera = respuesta::interpretar_cabecera(&bloque)?;
+    let es_medio = cabecera
+        .valores("content-type")
+        .next()
+        .and_then(|t| t.split(';').next())
+        .and_then(|t| FamiliaMedio::desde_mime(&t.trim().to_ascii_lowercase()))
+        .is_some();
     let limites = LimitesCuerpo {
-        cuerpo: red.limite_cuerpo_bytes,
+        cuerpo: if es_medio {
+            red.limite_cuerpo_medios_bytes
+        } else {
+            red.limite_cuerpo_bytes
+        },
         linea_chunk: red.limite_linea_chunk_bytes,
         cabeceras: red.limite_cabeceras_bytes,
     };

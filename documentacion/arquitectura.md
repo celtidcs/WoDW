@@ -18,8 +18,9 @@ Hay un único ejecutable (`wodw` en Linux, `wodw.exe` en Windows) que puede trab
 - **Maestro**: es el proceso que ves. Lleva la ventana, el cliente de Tor, el detector de
   incidentes (IDS) y decide qué hacer con cada página.
 - **sub-Worker efímero**: el mismo ejecutable arrancado con `--modo-worker`. El Maestro lanza uno
-  **por cada recurso descargado** (una página, una imagen, un audio). El sub-Worker se encierra a
-  sí mismo antes de leer nada, procesa ese único recurso, devuelve el resultado y muere.
+  **por cada recurso descargado** (una página, una imagen) y otro por cada audio o vídeo que se
+  reproduce, que vive solo mientras dura la reproducción. El sub-Worker se encierra a sí mismo
+  antes de leer nada, procesa ese único recurso, devuelve el resultado y muere.
 
 ¿Por qué así? Los programas que interpretan formatos complejos (HTML, imágenes) son donde suelen
 esconderse los fallos que un atacante aprovecha. Si un archivo malicioso consigue engañar al
@@ -37,12 +38,14 @@ red, no puede lanzar programas y va a morir en unos milisegundos.
 │     maestro/proceso_worker ──IPC (postcard, tramas u32)─┐ │
 └─────────────────────────────────────────────────────────┼─┘
                                                           ▼
-                              sub-Worker confinado: worker/{html,imagen,audio}
+             sub-Worker confinado: worker/{html, imagen, avif, av1, yuv, medios/}
 ```
 
 Maestro y sub-Worker se hablan por la entrada y salida estándar del proceso, con mensajes tipados
-serializados con `postcard` y precedidos de su longitud. El tamaño máximo de un mensaje es
-configurable, así que un Worker comprometido tampoco puede inundar al Maestro.
+serializados con `postcard` y precedidos de su longitud. Cada dirección tiene su tope
+configurable: lo que el Maestro envía (el archivo entero, hasta 257 MiB) y lo que el Worker devuelve
+(un bloque, hasta 48 MiB, lo justo para un fotograma 4K y su audio), así que un Worker comprometido
+tampoco puede inundar al Maestro.
 
 ## 2. Módulos
 
@@ -54,81 +57,136 @@ configurable, así que un Worker comprometido tampoco puede inundar al Maestro.
 | `maestro/red/configuracion_tor.rs` | Rutas de datos de Tor, puentes, transportes enchufables y **Vanguards**. |
 | `maestro/red/transporte.rs` | TLS (`native-tls`) sobre la conexión Tor cuando el destino es `https`. |
 | `maestro/navegacion/` | Sigue redirecciones, decide qué hacer según el tipo de contenido, lo manda al Worker y aplica la **respuesta automática** si algo es hostil. |
-| `maestro/proceso_worker.rs` | Lanza el sub-Worker efímero, lo mete en un Job Object en Windows, le da un plazo y reconoce si murió por intentar algo prohibido. |
+| `maestro/proceso_worker.rs` | Lanza el sub-Worker efímero (en Windows, suspendido dentro de un AppContainer sin red y de un Job Object con límite de memoria), le da un plazo y reconoce si murió por intentar algo prohibido. Permite varias peticiones al mismo Worker para los medios. |
+| `maestro/medios/` | Reproducción en el Maestro: segunda validación de cada bloque (`validar_bloque`), tarea que pide bloques al Worker (`productor`) y estado compartido con búfer, reloj, pausa y volumen (`reproduccion`). |
+| `maestro/versiones.rs` | Aviso de versión nueva: interpreta la respuesta de GitHub como no confiable. |
+| `registro.rs` | Registro de la sesión con contenido y guardado elegibles. |
 | `maestro/sesion.rs` | Un hilo propio con el runtime de Tokio: arranca Tor, alimenta el IDS y vigila los señuelos. |
 | `ipc/` | Los mensajes entre Maestro y Worker y el canal que los transporta. |
-| `worker/` | Lo que hace el Worker: `html` (texto, título, enlaces), `imagen` (a píxeles RGBA), `audio` (WAV con filtro) y `sandbox/` (el encierro). |
+| `worker/` | Lo que hace el Worker: `html` (texto, título, enlaces y medios incrustados), `imagen` y `avif` (a píxeles RGBA), `av1` y `yuv` (decodificación AV1 y reconstrucción de fotogramas), `medios/` (identificación y revisión estructural de contenedores, audio con `symphonia`/`opus-decoder` y su cadena de 48 kHz, vídeo en `fuente_video/` con una pieza para MP4, otra para WebM y otra para H.264), `entidades_html` (entidades HTML) y `sandbox/` (el encierro; `appcontainer/` separa el perfil y sus permisos, la creación del proceso y el citado de la línea de órdenes). |
+| `seguridad/texto.rs`, `seguridad/enlaces.rs` | Higiene Unicode del texto y detección de enlaces engañosos, compartidas por Worker y Maestro. |
+| `seguridad/sin_volcados.rs` | Terminación inmediata sin volcados de memoria, asignador que termina en vez de abortar y filtro de excepciones. |
 | `ids/` | Los eventos de seguridad y el motor que decide la contramedida. |
 | `seguridad/` | Señuelos en disco (canario), página trampa en memoria (Honeypot), firma en memoria y borrado seguro con `zeroize`. |
-| `ui/` | La ventana: estado del navegador sin dependencias gráficas (`estado.rs`), paneles, icono, y todos los textos visibles en un único sitio (`textos.rs`). |
+| `unidades.rs` | Las constantes de conversión de unidades (milisegundos, minutos, tantos por ciento y por mil, KiB), para que ninguna cifra de conversión quede suelta. |
+| `ui/` | La ventana (`app/`: estado y eventos, anotaciones del registro y dibujado por separado), estado del navegador sin dependencias gráficas (`estado.rs`), paneles, reproductor (`reproductor.rs`, `salida_audio.rs` con `cpal`), panel del registro, fuentes embebidas (`fuentes.rs`), icono, y todos los textos visibles en un único sitio (`textos.rs`). |
 
 ## 3. Red
 
-- **Tor dentro de la aplicación.** WoDW usa `arti-client`, la implementación de Tor en Rust del
-  Proyecto Tor. No hace falta instalar Tor, no se abre ningún puerto local y los nombres se
-  resuelven siempre dentro de Tor, nunca con el DNS del sistema.
-- **Stream Isolation.** Cada pestaña tiene su propio cliente aislado, así que sus conexiones nunca
-  comparten circuito con las de otra pestaña. Un sitio no puede relacionar lo que haces en dos
-  pestañas por el circuito. Rotar descarta esos clientes y las peticiones siguientes salen por
-  circuitos nuevos.
-- **Vanguards** en modo `lite` por defecto, para dificultar que un servicio onion malicioso
-  descubra el nodo de entrada que usas.
-- **Puentes y transportes enchufables** (obfs4, Snowflake) para que el proveedor de internet no
-  vea que usas Tor.
-- **HTTP desconfiado.** Se envían las cabeceras de Tor Browser, se espera un instante aleatorio
-  antes de cada petición, hay plazo en cada lectura y escritura y límites de tamaño en cabeceras,
-  cuerpo y bloques. Se rechazan las respuestas ambiguas (`Transfer-Encoding` raro, `Content-Length`
-  contradictorio, cabeceras plegadas) y los saltos de línea o caracteres de control colados en el
-  host, la ruta o el tipo de contenido.
+WoDW lleva Tor dentro gracias a `arti-client`, la implementación de Tor en Rust del propio Proyecto
+Tor. No hace falta instalar Tor aparte, no se abre ningún puerto local y los nombres de dominio se
+resuelven siempre dentro de Tor, nunca con el DNS del sistema.
+
+Cada pestaña tiene su propio cliente aislado (*Stream Isolation*), de modo que sus conexiones nunca
+comparten circuito con las de otra pestaña y un sitio no puede relacionar por el circuito lo que
+haces en dos de ellas. Cuando se rotan los circuitos, esos clientes se descartan y las peticiones
+siguientes salen por circuitos nuevos. Vanguards funciona en modo `lite` de serie, para dificultar
+que un servicio onion malicioso descubra qué nodo de entrada usas, y los puentes con transportes
+enchufables (obfs4, Snowflake) permiten ocultar al proveedor de internet que se está usando Tor.
+
+El cliente HTTP es pequeño y desconfiado. Envía las mismas cabeceras que Tor Browser, espera un
+instante aleatorio antes de cada petición, pone plazo a cada lectura y escritura y limita el tamaño
+de las cabeceras, del cuerpo y de cada bloque. Rechaza las respuestas ambiguas, como un
+`Transfer-Encoding` extraño, un `Content-Length` contradictorio o cabeceras plegadas, y también los
+saltos de línea o caracteres de control colados en el host, la ruta o el tipo de contenido. Los
+audios y vídeos tienen un tope de tamaño propio, mayor que el de las páginas.
 
 ## 4. El encierro del sub-Worker
 
 El sub-Worker se encierra **antes** de crear su runtime y antes de recibir ningún dato de fuera.
 
-**Linux y Tails** (`worker/sandbox/linux.rs`):
+**Linux y Tails** (`worker/sandbox/linux.rs`). La primera capa son las opciones de `prctl`: el
+proceso no se puede depurar ni volcar (`PR_SET_DUMPABLE=0`), no puede ganar privilegios
+(`PR_SET_NO_NEW_PRIVS=1`) y muere si muere el Maestro (`PR_SET_PDEATHSIG=SIGKILL`). Después,
+Landlock le quita todo acceso al sistema de archivos y, en los núcleos que lo admiten, también la
+posibilidad de hacer `bind` o `connect` por TCP. Si el núcleo no aplica Landlock, el Worker se niega
+a procesar nada.
 
-1. `prctl`: no se puede depurar ni volcar su memoria (`PR_SET_DUMPABLE=0`), no puede ganar
-   privilegios (`PR_SET_NO_NEW_PRIVS=1`) y muere si muere el Maestro (`PR_SET_PDEATHSIG=SIGKILL`).
-2. **Landlock**: sin acceso al sistema de archivos y, en núcleos que lo admiten, sin
-   `bind`/`connect` TCP. Si el núcleo no aplica Landlock, el Worker se niega a procesar nada.
-3. **seccomp** (primer filtro): crear sockets de red, conectarse, escuchar, ejecutar programas,
-   depurar otros procesos o leer su memoria **mata el proceso al instante**. El Maestro reconoce esa
-   muerte y la trata como un incidente crítico. La única excepción es `socketpair(AF_UNIX)`, que
-   Tokio necesita para arrancar: es un par de extremos locales sin nombre que no llega ni a la red
-   ni al disco.
-4. **seccomp** (segundo filtro): crear procesos (`fork`, `vfork`, `clone` sin `CLONE_THREAD`,
-   `clone3`) falla. Un hijo no heredaría la orden de morir con el Maestro y podría sobrevivir al
-   borrado de emergencia. Crear hilos sí está permitido. El error devuelto es `ENOSYS` porque el
-   filtro no puede leer las opciones de `clone3`; así la biblioteca de C reintenta con `clone`,
-   donde sí se distingue un hilo de un proceso.
+Encima van dos filtros seccomp. El primero mata el proceso al instante si intenta crear sockets de
+red, conectarse, escuchar, ejecutar programas, depurar otros procesos o leer su memoria; el Maestro
+reconoce esa muerte y la trata como un incidente crítico. La única excepción es
+`socketpair(AF_UNIX)`, que Tokio necesita para arrancar y que crea un par de extremos locales sin
+nombre que no llegan ni a la red ni al disco. El segundo filtro hace fallar cualquier intento de
+crear procesos (`fork`, `vfork`, `clone` sin `CLONE_THREAD` y `clone3`), porque un hijo no heredaría
+la orden de morir con el Maestro y podría sobrevivir al borrado de emergencia. Los hilos sí están
+permitidos. El error que se devuelve es `ENOSYS`, porque el filtro no puede leer las opciones de
+`clone3`; así la biblioteca de C reintenta con `clone`, donde sí se distingue un hilo de un proceso.
+Por último, `RLIMIT_AS` limita la memoria que puede reservar.
 
-**Windows** (`worker/sandbox/windows.rs`):
+**Windows** (`worker/sandbox/appcontainer.rs` y `worker/sandbox/windows.rs`). El Maestro crea el
+Worker suspendido y dentro de un AppContainer sin ninguna capacidad. Al no tener `internetClient` ni
+ninguna otra, Windows le impide abrir conexiones de red, incluso hacia `127.0.0.1`; se comprobó
+contra internet real que el mismo programa conecta fuera de la jaula y no dentro. El AppContainer
+necesita un perfil, vacío, en el registro del usuario, que se crea al arrancar WoDW y se borra al
+cerrarlo con normalidad, y su identificador necesita permiso de lectura y ejecución sobre el propio
+ejecutable. Antes de reanudarlo, el Maestro lo mete en un Job Object, así que el Worker no llega a
+ejecutar ni una instrucción fuera de él.
 
-1. Políticas de mitigación del proceso: sin código generado en ejecución, **sin procesos hijo**,
-   sin puntos de extensión, comprobación estricta de descriptores, solo DLL firmadas por Microsoft
-   y sin cargar imágenes remotas ni de integridad baja.
-2. Nivel de **integridad baja**: Windows le niega escribir en el perfil del usuario y en casi todo
-   el disco.
-3. El Maestro lo mete en un **Job Object** que mata al Worker si se cierra el Maestro y no le deja
-   tener más procesos. Si no puede meterlo, lo destruye y la navegación falla: nunca se procesa nada
-   sin encierro.
+El Job Object mata al Worker si se cierra el Maestro, le impide tener otros procesos y limita su
+memoria, a 2 GiB de serie. Si algo falla al encerrarlo, el Maestro lo destruye y la navegación
+falla: nunca se procesa nada sin encierro. Ya en marcha, el propio Worker activa las políticas de
+mitigación de Windows (sin código generado en ejecución, sin procesos hijo, sin puntos de extensión,
+comprobación estricta de descriptores, solo DLL firmadas por Microsoft y sin cargar imágenes remotas
+ni de integridad baja) y baja a integridad baja, con lo que Windows le niega escribir en el perfil
+del usuario y en casi todo el disco.
+
+En los dos sistemas, el trabajo del Worker se hace en un hilo con 16 MiB de pila, porque los
+decodificadores de vídeo desbordaban el hilo principal, que en Windows tiene solo 1 MiB.
+
+**Sin volcados de memoria** (`seguridad/sin_volcados.rs`, en el Maestro y en el Worker). Las
+primeras versiones salían con `abort()`, y en Windows eso hacía que el sistema escribiera en
+`%LOCALAPPDATA%\CrashDumps` un volcado de toda la memoria de la sesión; se midieron unos 41 MB por
+cada pánico. Ahora la salida inmediata usa `TerminateProcess` en Windows y `_exit` en Linux, que no
+pasan por el informe de errores. El asignador de memoria global termina de la misma forma si el
+sistema se queda sin memoria, en lugar de abortar, y un filtro de excepciones no controladas hace
+lo mismo ante cualquier fallo. En Linux, además, el Maestro también se declara no volcable y sin
+*core*.
 
 ## 5. Qué se muestra y cómo se limpia (modo «Safest»)
 
-- **Páginas**: un recorrido propio, sin construir un DOM, saca el título, el texto visible y los
-  enlaces. Ignora `script`, `style`, `noscript`, `template`, `iframe`, `object`, `embed`, `svg` y
-  `math`, quita caracteres de control y marcas de dirección de texto (el truco *Trojan Source*) y
-  decodifica las entidades HTML.
-- **Enlaces**: se resuelven respecto a la página y solo se aceptan `http` y `https`. Nada de
-  `javascript:`, `file:` o `data:`.
-- **Imágenes**: PNG, JPEG, GIF, WebP y BMP. El formato declarado tiene que coincidir con los bytes,
-  y el tamaño y la memoria se limitan **antes** de decodificar, para frenar las bombas de
-  descompresión. El resultado son píxeles RGBA sin metadatos (ni EXIF ni perfiles de color). El
-  Maestro vuelve a comprobar que los píxeles cuadran con las dimensiones: tampoco se fía del Worker.
-- **Audio**: WAV PCM de 16 bits pasado por un filtro **paso bajo** Butterworth de orden 8 con corte
-  en 18 kHz (configurable), que elimina ultrasonidos que podrían usarse para rastrear dispositivos.
-  No se reproduce: solo se informa.
-- **Todo lo demás** (ejecutables, PDF, documentos) no se procesa ni se guarda.
+**Páginas.** Un recorrido propio del HTML, sin construir un DOM, saca el título, el texto visible,
+los enlaces y la lista de medios incrustados (`img`, `audio`, `video` y `source`; solo sus
+direcciones, porque nada se descarga sin pedirlo). Ignora por completo `script`, `style`,
+`noscript`, `template`, `iframe`, `object`, `embed`, `svg` y `math`. Del texto quita los caracteres
+de control, las marcas de dirección que usa el truco *Trojan Source* y los caracteres invisibles; lo
+normaliza a NFC, decodifica las entidades HTML y lo corta si supera un tope de caracteres. El
+Maestro repite la limpieza por su cuenta y marca los enlaces engañosos, es decir, aquellos cuyo
+texto aparenta otro destino o cuyo nombre empieza por `xn--`. Los enlaces se resuelven respecto a la
+página y solo se aceptan los `http` y `https`; nada de `javascript:`, `file:` o `data:`.
+
+**Imágenes.** PNG, JPEG, GIF, WebP, BMP, TIFF, ICO y QOI se decodifican con `image`, y AVIF con
+`avif-parse` y `re_rav1d`. La firma de los bytes tiene que coincidir con el formato declarado, y la
+resolución, con un máximo de 4K en cualquier orientación, se comprueba en la cabecera **antes** de
+decodificar. Lo que sale del Worker son píxeles RGBA sin metadatos, y el Maestro vuelve a comprobar
+las dimensiones y el límite.
+
+**Audio y vídeo** (`worker/medios/`). Se procesan por bloques de medio segundo y solo cuando el
+usuario pulsa «Reproducir». Primero se identifica el contenedor por su firma y se exige que
+pertenezca a la familia declarada, audio o vídeo. Después, una revisión estructural propia comprueba
+el contenedor antes de que ningún decodificador lo toque: que las cajas MP4 encajen unas dentro de
+otras, que las páginas Ogg tengan un CRC correcto, que un FLAC empiece por su bloque STREAMINFO, que
+los fragmentos RIFF, la etiqueta ID3 y las tramas ADTS cuadren, y que los elementos EBML de
+Matroska queden dentro de su contenedor.
+
+El audio se decodifica con `symphonia` y `opus-decoder`, ambos escritos en Rust sin `unsafe`. Se
+mezcla a estéreo, pasa por un filtro paso bajo Butterworth de orden 8 con corte en 18 kHz
+(configurable), se remuestrea a 48 kHz con una interpolación cúbica propia, vuelve a pasar por el
+mismo filtro y termina en un limitador de pico. El segundo filtro no es redundante: se midió que el
+residuo del remuestreo en 20,9 kHz queda 58 dB por debajo con él y solo 9,6 dB sin él.
+
+El vídeo MP4 se desmonta con `re_mp4` y se decodifica con OpenH264 de Cisco si es H.264, la única
+pieza escrita en C, o con `re_rav1d` si es AV1. El WebM se desmonta con `matroska-demuxer` y se
+decodifica con `re_rav1d`. Cada fotograma se reconstruye a RGBA en `worker/yuv.rs` y se entrega en
+orden de presentación. Si el vídeo no tiene pista de audio, se envía silencio para que el reloj de
+reproducción avance igualmente.
+
+Ya en el Maestro, cada bloque se valida otra vez: que sea estéreo, que no supere el tope de
+muestras ni el pico permitido, que los fotogramas cuadren con sus dimensiones y que las marcas de
+tiempo no retrocedan. Un bloque incoherente se trata como un incidente. El sonido sale por `cpal`, y
+el reloj que sincroniza la imagen es el audio que ya se ha reproducido.
+
+Todo lo demás, desde ejecutables y PDF hasta cualquier formato fuera de la lista, ni se procesa ni
+se guarda.
 
 ## 6. Detección y respuesta automática
 
@@ -146,18 +204,19 @@ La aplicación se defiende sola, sin que tengas que pulsar nada:
 
 El **pánico** (automático, con el **Botón del Pánico** o pulsando `Esc` tres veces seguidas)
 sobrescribe con `zeroize` las pestañas, el historial, la barra y los textos, renueva los circuitos,
-olvida los bloqueos y, si `panico.abortar_proceso` está activo, termina el proceso al instante con
-`abort()`. Los sub-Workers mueren con el Maestro (Job Object en Windows, `PR_SET_PDEATHSIG` en Linux).
+olvida los bloqueos y, si `panico.abortar_proceso` está activo, termina el proceso al instante sin
+dejar volcados (véase el apartado 4). Los sub-Workers mueren con el Maestro (Job Object en Windows, `PR_SET_PDEATHSIG` en Linux).
 
 ## 7. Señuelos
 
-- **canario** en disco (desactivados por defecto, porque escriben en disco): archivos señuelo que
-  se vigilan. Detectan que alguien los modifique, los sustituya, los borre o les quite el acceso.
-  **No** detectan que alguien solo los lea; ningún sistema de archivos lo permite de forma fiable
-  sin privilegios.
-- **Honeypot** en memoria: una página de memoria sin permisos. Un código inyectado que recorra la
-  memoria a ciegas la toca y el proceso termina en el acto.
-- **Firma en memoria** que la sesión comprueba de forma periódica.
+Los señuelos en disco (el «canario») están desactivados de serie, porque escriben en el disco. Si se
+activan, WoDW crea unos archivos y los vigila, y detecta que alguien los modifique, los sustituya,
+los borre o les quite el acceso. Lo que no puede detectar es que alguien solo los lea, porque ningún
+sistema de archivos lo permite de forma fiable sin privilegios.
+
+En memoria hay dos trampas más. La primera es una página de memoria sin permisos (el **Honeypot**): un
+código inyectado que recorra la memoria a ciegas acabará tocándola, y el proceso terminará en el
+acto. La segunda es una firma que la sesión comprueba de forma periódica.
 
 ## 8. Interfaz
 
@@ -191,12 +250,21 @@ publique la versión corregida, la copia y esa sección se eliminarán.
 
 ## Limitaciones conocidas
 
-- **El sub-Worker de Windows conserva acceso a la red.** La integridad baja no lo impide.
-  Cortarlo del todo exige AppContainer, que obliga a cambiar los permisos del propio ejecutable.
-- **`DisallowWin32kSystemCalls` no se puede aplicar** porque el ejecutable único carga la parte
-  gráfica de Windows (`user32.dll`). Haría falta un ejecutable de Worker separado y sin interfaz.
-- **Tails no se ha probado.** El encierro de Linux se ha comprobado en un núcleo Linux 6.6.
-- **Renderizado**: `eframe` dibuja con la GPU (`wgpu`), no por software.
-- **No implementado** todavía: WebAssembly (`wasmtime`), `memfd`/`SCM_RIGHTS`, `mlock`, portapapeles
-  que se borra solo, detección de homoglifos, PGP integrado, reproducción de audio y vídeo y
-  normalización Unicode NFC.
+El AppContainer deja dos huellas en el sistema. Crea un perfil vacío en el registro del usuario, que
+se borra al cerrar WoDW con normalidad; tras un pánico se queda y se reutiliza en el siguiente
+arranque. Además, concede al identificador del Worker permiso de lectura y ejecución sobre el
+ejecutable.
+
+`egui` no compone texto complejo, así que el árabe, el persa y el jemer se ven con las letras
+sueltas, sin unir ni reordenar. Tampoco se admiten los vídeos VP8, VP9 ni Ogg Theora, porque solo
+existen decodificadores escritos en C que no se pueden incluir de forma portable.
+
+La mitigación `DisallowWin32kSystemCalls` no se puede aplicar, porque el ejecutable único carga la
+parte gráfica de Windows (`user32.dll`); haría falta un ejecutable de Worker separado y sin interfaz.
+
+Tails todavía no se ha probado; el encierro de Linux se ha comprobado en un núcleo 6.6. La interfaz
+se dibuja con la GPU (`wgpu`), no por software.
+
+Quedan sin implementar el aislamiento con WebAssembly (`wasmtime`), el paso de datos por
+`memfd`/`SCM_RIGHTS`, el bloqueo de memoria con `mlock`, un portapapeles que se borre solo y PGP
+integrado.

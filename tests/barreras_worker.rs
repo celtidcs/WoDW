@@ -3,8 +3,19 @@
 use std::f64::consts::PI;
 use std::io::Cursor;
 use wodw::configuracion::ConfiguracionWorker;
-use wodw::ipc::mensajes::{FormatoImagen, OrdenWorker, RespuestaWorker};
-use wodw::worker::procesar_orden;
+use wodw::ipc::mensajes::{FamiliaMedio, FormatoImagen, OrdenWorker, RespuestaWorker};
+use wodw::worker::{procesar_orden, EstadoWorker};
+
+/// Worker con la configuración por defecto.
+trait ParaPruebas {
+    fn new_para_pruebas() -> Self;
+}
+
+impl ParaPruebas for EstadoWorker {
+    fn new_para_pruebas() -> Self {
+        EstadoWorker::nuevo(ConfiguracionWorker::default())
+    }
+}
 
 fn procesar(orden: OrdenWorker) -> RespuestaWorker {
     procesar_orden(orden, &ConfiguracionWorker::default()).expect("respuesta")
@@ -77,21 +88,34 @@ fn ganancia_db(frecuencia_muestreo: u32, tono: f64) -> f64 {
         .iter()
         .map(|&b| i16::from_le_bytes(b))
         .collect();
-    let r = procesar(OrdenWorker::ProcesarAudio {
+    let mut worker = EstadoWorker::new_para_pruebas();
+    let abierto = worker.atender(OrdenWorker::AbrirMedio {
         id_tarea: 1,
+        familia: FamiliaMedio::Audio,
         datos_crudos: bytes,
     });
-    let RespuestaWorker::AudioProcesado {
-        muestras_pcm,
-        frecuencia_muestreo: fs,
-        ..
-    } = r
-    else {
-        panic!("se esperaba AudioProcesado: {r:?}");
-    };
-    assert_eq!(fs, frecuencia_muestreo);
-    let descarte = entrada.len() / 5;
+    assert!(
+        matches!(
+            abierto,
+            Some(RespuestaWorker::MedioAbierto { audio: true, .. })
+        ),
+        "{abierto:?}"
+    );
+    let mut muestras_pcm = Vec::new();
+    loop {
+        let r = worker.atender(OrdenWorker::SiguienteBloque { id_tarea: 1 });
+        let Some(RespuestaWorker::BloqueMedio { audio_pcm, fin, .. }) = r else {
+            panic!("se esperaba BloqueMedio: {r:?}");
+        };
+        muestras_pcm.extend(audio_pcm);
+        if fin {
+            break;
+        }
+    }
+    // La salida es siempre estéreo a 48 kHz: se mide la energía media, que no
+    // depende de la frecuencia de muestreo ni de duplicar el canal.
     let rms = |v: &[i16]| {
+        let descarte = v.len() / 5;
         (v[descarte..]
             .iter()
             .map(|&x| f64::from(x).powi(2))

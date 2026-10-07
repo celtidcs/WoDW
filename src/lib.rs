@@ -15,6 +15,8 @@ pub mod error;
 pub mod ids;
 pub mod ipc;
 pub mod maestro;
+pub mod registro;
 pub mod seguridad;
 pub mod ui;
+pub mod unidades;
 pub mod worker;

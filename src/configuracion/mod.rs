@@ -10,9 +10,11 @@ pub mod secciones;
 mod validacion;
 
 pub use secciones::{
-    ConfiguracionAutomatizacion, ConfiguracionCanarios, ConfiguracionIds, ConfiguracionInterfaz,
-    ConfiguracionMotores, ConfiguracionPanico, ConfiguracionRedHttp, ConfiguracionTor,
-    ConfiguracionWorker, ModoVanguardias, MotorConfigurado, TransporteEnchufable,
+    ConfiguracionActualizaciones, ConfiguracionAutomatizacion, ConfiguracionCanarios,
+    ConfiguracionIds, ConfiguracionInterfaz, ConfiguracionMotores, ConfiguracionPanico,
+    ConfiguracionRedHttp, ConfiguracionRegistro, ConfiguracionReproduccion, ConfiguracionTor,
+    ConfiguracionWorker, ContenidoRegistro, GuardadoRegistro, ModoVanguardias, MotorConfigurado,
+    TransporteEnchufable,
 };
 pub use validacion::es_direccion_onion_v3;
 
@@ -35,6 +37,12 @@ pub struct ConfiguracionWodw {
     pub motores: ConfiguracionMotores,
     /// Procesamiento confinado en el Worker.
     pub worker: ConfiguracionWorker,
+    /// Reproducción de audio y vídeo.
+    pub reproduccion: ConfiguracionReproduccion,
+    /// Aviso de versión nueva.
+    pub actualizaciones: ConfiguracionActualizaciones,
+    /// Registro de la sesión.
+    pub registro: ConfiguracionRegistro,
     /// Motor IDS.
     pub ids: ConfiguracionIds,
     /// Botón del pánico.

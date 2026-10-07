@@ -8,6 +8,8 @@
 [red]
 # Tamaño máximo del cuerpo de una respuesta (10 MiB).
 limite_cuerpo_bytes = 10485760
+# Tamaño máximo de un audio o vídeo descargado (256 MiB).
+limite_cuerpo_medios_bytes = 268435456
 # Tamaño máximo del bloque de cabeceras HTTP (64 KiB).
 limite_cabeceras_bytes = 65536
 # Longitud máxima de una línea de tamaño de chunk (1 KiB).
@@ -63,16 +65,44 @@ descripcion = "Búsqueda en web superficial a través de la red Onion (versión 
 plantilla = "https://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion/html/?q={consulta}"
 
 [worker]
-# Tamaño máximo de un mensaje entre Maestro y Worker (16 MiB).
-limite_mensaje_ipc_bytes = 16777216
-# Dimensiones y memoria máximas de una imagen antes de decodificarla.
-ancho_maximo_imagen = 4096
-alto_maximo_imagen = 4096
+# Tamaño máximo de un mensaje del Worker al Maestro (48 MiB: cabe un fotograma 4K).
+limite_mensaje_ipc_bytes = 50331648
+# Tamaño máximo de una orden del Maestro al Worker, que lleva el archivo entero (257 MiB).
+limite_orden_ipc_bytes = 269484032
+# Resolución máxima de imágenes y vídeos (4K), en cualquier orientación. Se comprueba en la
+# cabecera antes de decodificar: lo que la supere se rechaza, no se reduce.
+# Si la subes, sube también limite_mensaje_ipc_bytes: tiene que caber un fotograma de esa
+# resolución (ancho × alto × 4 bytes) o WoDW no arrancará.
+lado_largo_maximo_px = 3840
+lado_corto_maximo_px = 2160
+# Memoria máxima que puede reservar el decodificador de imágenes.
 memoria_maxima_imagen_bytes = 134217728
+# Tope de caracteres del texto visible de una página (si se supera, se recorta y se avisa).
+max_caracteres_texto = 1000000
 # Corte del filtro paso bajo de audio contra balizas ultrasónicas.
 frecuencia_corte_audio_hz = 18000
+# Pico máximo del audio en milésimas de la escala completa (891 ≈ −1 dBFS).
+pico_maximo_audio_por_mil = 891
+# Duración aproximada de cada bloque de audio/vídeo que entrega el Worker (ms).
+duracion_bloque_ms = 500
+# Memoria máxima de cada Worker (2 GiB): si un archivo intenta agotarla, solo muere el Worker.
+memoria_maxima_worker_bytes = 2147483648
 # Plazo para que un Worker entregue su respuesta.
 tiempo_espera_ms = 15000
+
+[actualizaciones]
+# Al conectar con Tor, consulta (por Tor) si hay una versión nueva y avisa. Nunca descarga nada.
+comprobar_al_iniciar = true
+url_api = "https://api.github.com/repos/celtidcs/WoDW/releases/latest"
+url_publicaciones = "https://github.com/celtidcs/WoDW/releases/tag/"
+
+[reproduccion]
+# Audio que se prepara por adelantado (ms).
+bufer_audio_ms = 2000
+# Fotogramas de vídeo preparados por adelantado (cada fotograma 4K ocupa ~33 MB).
+max_fotogramas_en_bufer = 8
+# Volumen inicial en porcentaje (máximo 100: el volumen solo atenúa).
+volumen_inicial_por_ciento = 80
 
 [ids]
 capacidad_canal = 256

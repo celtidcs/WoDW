@@ -6,6 +6,9 @@
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 
+/// Número de niveles de [`NivelSeveridad`].
+pub const NUMERO_NIVELES_SEVERIDAD: usize = 4;
+
 /// Nivel de criticidad de un evento defensivo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub enum NivelSeveridad {

@@ -4,7 +4,9 @@
 //! se descartan los elementos activos o incrustados y se extraen el texto
 //! visible y los hipervínculos `http`/`https` resueltos contra la URL de origen.
 
-use crate::ipc::mensajes::Enlace;
+use crate::ipc::mensajes::{Enlace, MedioEnlazado, TipoMedioEnlazado};
+use crate::seguridad::texto::{limpiar_texto, recortar};
+use crate::worker::entidades_html::decodificar_entidades;
 use url::Url;
 
 /// Elementos cuyo contenido se descarta por completo.
@@ -49,6 +51,27 @@ pub struct DocumentoSanitizado {
     pub texto: String,
     /// Enlaces http/https absolutos.
     pub enlaces: Vec<Enlace>,
+    /// Medios incrustados (sin descargar).
+    pub medios: Vec<MedioEnlazado>,
+    /// Si el texto superaba el tope de caracteres y se recortó.
+    pub recortado: bool,
+}
+
+/// Topes del sanitizado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LimitesHtml {
+    /// Caracteres del texto visible.
+    pub max_caracteres: usize,
+    /// Medios incrustados listados.
+    pub max_medios: usize,
+}
+
+impl LimitesHtml {
+    /// Sin topes (para pruebas y usos internos).
+    pub const SIN_TOPES: Self = Self {
+        max_caracteres: usize::MAX,
+        max_medios: usize::MAX,
+    };
 }
 
 /// Etiqueta interpretada.
@@ -65,15 +88,22 @@ struct Recorrido {
     ignorando: Option<String>,
     en_titulo: bool,
     enlace_abierto: Option<(String, String)>,
+    /// `<audio>` o `<video>` abierto: da tipo a sus `<source>`.
+    contenedor_medio: Option<TipoMedioEnlazado>,
+    max_medios: usize,
 }
 
-/// Sanitiza `html` resolviendo enlaces relativos contra `url_origen`.
-pub fn sanitizar_html(html: &[u8], url_origen: &str) -> DocumentoSanitizado {
+/// Sanitiza `html` resolviendo enlaces relativos contra `url_origen` y aplica
+/// los `limites` de texto y de medios listados.
+pub fn sanitizar_html(html: &[u8], url_origen: &str, limites: LimitesHtml) -> DocumentoSanitizado {
     let texto = String::from_utf8_lossy(html);
     // Minúsculas ASCII: mismos desplazamientos en bytes que `texto`.
     let minusculas = texto.to_ascii_lowercase();
     let base = Url::parse(url_origen).ok();
-    let mut recorrido = Recorrido::default();
+    let mut recorrido = Recorrido {
+        max_medios: limites.max_medios,
+        ..Recorrido::default()
+    };
     let mut posicion = 0usize;
     loop {
         if let Some(nombre) = &recorrido.ignorando {
@@ -96,7 +126,7 @@ pub fn sanitizar_html(html: &[u8], url_origen: &str) -> DocumentoSanitizado {
         }
         posicion = inicio + consumido;
     }
-    recorrido.cerrar()
+    recorrido.cerrar(limites.max_caracteres)
 }
 
 impl Recorrido {
@@ -129,11 +159,48 @@ impl Recorrido {
         if ELEMENTOS_DE_BLOQUE.contains(&etiqueta.nombre.as_str()) {
             self.documento.texto.push('\n');
         }
-        if etiqueta.nombre == "title" {
-            self.en_titulo = !etiqueta.cierre;
-        } else if etiqueta.nombre == "a" {
-            self.enlace(etiqueta, base);
+        match etiqueta.nombre.as_str() {
+            "title" => self.en_titulo = !etiqueta.cierre,
+            "a" => self.enlace(etiqueta, base),
+            "img" | "audio" | "video" | "source" => self.medio(etiqueta, base),
+            _ => {}
         }
+    }
+
+    /// Registra un medio incrustado (solo su URL: no se descarga nada).
+    fn medio(&mut self, etiqueta: Etiqueta, base: Option<&Url>) {
+        let tipo = match etiqueta.nombre.as_str() {
+            "img" => Some(TipoMedioEnlazado::Imagen),
+            "audio" | "video" if etiqueta.cierre => {
+                self.contenedor_medio = None;
+                return;
+            }
+            "audio" => Some(TipoMedioEnlazado::Audio),
+            "video" => Some(TipoMedioEnlazado::Video),
+            _ => self.contenedor_medio,
+        };
+        if matches!(etiqueta.nombre.as_str(), "audio" | "video") {
+            self.contenedor_medio = tipo;
+        }
+        let Some(tipo) = tipo else {
+            return;
+        };
+        let atributo = |nombre: &str| {
+            etiqueta
+                .atributos
+                .iter()
+                .find(|(n, _)| n == nombre)
+                .map(|(_, v)| v.as_str())
+        };
+        let Some(url) = atributo("src").and_then(|src| resolver_enlace(src, base)) else {
+            return;
+        };
+        let medios = &mut self.documento.medios;
+        if medios.len() >= self.max_medios || medios.iter().any(|m| m.url == url) {
+            return;
+        }
+        let texto = normalizar_espacios(&limpiar_texto(atributo("alt").unwrap_or_default()));
+        medios.push(MedioEnlazado { tipo, url, texto });
     }
 
     fn enlace(&mut self, etiqueta: Etiqueta, base: Option<&Url>) {
@@ -159,7 +226,7 @@ impl Recorrido {
         }
     }
 
-    fn cerrar(mut self) -> DocumentoSanitizado {
+    fn cerrar(mut self, max_caracteres: usize) -> DocumentoSanitizado {
         self.finalizar_enlace();
         let lineas: Vec<String> = self
             .documento
@@ -168,18 +235,26 @@ impl Recorrido {
             .map(normalizar_espacios)
             .filter(|l| !l.is_empty())
             .collect();
-        self.documento.texto = lineas.join("\n");
+        (self.documento.texto, self.documento.recortado) =
+            recortar(lineas.join("\n"), max_caracteres);
         self.documento.titulo = normalizar_espacios(&self.documento.titulo);
         self.documento
     }
 }
 
+/// Apertura de un comentario HTML.
+const APERTURA_COMENTARIO: &str = "<!--";
+/// Cierre de un comentario HTML.
+const CIERRE_COMENTARIO: &str = "-->";
+
 /// Lee una etiqueta que empieza en `<`. Devuelve la etiqueta (si es un
 /// elemento) y los bytes consumidos. Los comentarios y declaraciones se consumen
 /// sin producir etiqueta.
 fn leer_etiqueta(fuente: &str) -> (Option<Etiqueta>, usize) {
-    if let Some(cuerpo) = fuente.strip_prefix("<!--") {
-        let fin = cuerpo.find("-->").map_or(fuente.len(), |p| 4 + p + 3);
+    if let Some(cuerpo) = fuente.strip_prefix(APERTURA_COMENTARIO) {
+        let fin = cuerpo.find(CIERRE_COMENTARIO).map_or(fuente.len(), |p| {
+            APERTURA_COMENTARIO.len() + p + CIERRE_COMENTARIO.len()
+        });
         return (None, fin);
     }
     let fin = fin_de_etiqueta(fuente);
@@ -279,72 +354,6 @@ fn resolver_enlace(href: &str, base: Option<&Url>) -> Option<String> {
         .then(|| url.to_string())
 }
 
-/// Decodifica las entidades HTML más comunes y las numéricas.
-fn decodificar_entidades(texto: &str) -> String {
-    let mut salida = String::with_capacity(texto.len());
-    let mut resto = texto;
-    while let Some(inicio) = resto.find('&') {
-        salida.push_str(&resto[..inicio]);
-        let tras = &resto[inicio + 1..];
-        match tras.find(';').filter(|fin| *fin <= LONGITUD_MAXIMA_ENTIDAD) {
-            Some(fin) => match entidad(&tras[..fin]) {
-                Some(caracter) => {
-                    salida.push(caracter);
-                    resto = &tras[fin + 1..];
-                }
-                None => {
-                    salida.push('&');
-                    resto = tras;
-                }
-            },
-            None => {
-                salida.push('&');
-                resto = tras;
-            }
-        }
-    }
-    salida.push_str(resto);
-    salida
-}
-
-/// Longitud máxima del nombre de una entidad reconocida (`#x10FFFF` = 8).
-const LONGITUD_MAXIMA_ENTIDAD: usize = 8;
-
-/// Carácter de una entidad sin `&` ni `;`.
-fn entidad(nombre: &str) -> Option<char> {
-    match nombre {
-        "amp" => Some('&'),
-        "lt" => Some('<'),
-        "gt" => Some('>'),
-        "quot" => Some('"'),
-        "apos" => Some('\''),
-        "nbsp" => Some(' '),
-        _ => {
-            let numero = nombre.strip_prefix('#')?;
-            let valor = match numero.strip_prefix(['x', 'X']) {
-                Some(hex) => u32::from_str_radix(hex, 16).ok()?,
-                None => numero.parse().ok()?,
-            };
-            char::from_u32(valor)
-        }
-    }
-}
-
-/// Elimina controles (salvo salto de línea y tabulador) y marcas bidireccionales
-/// usadas en ataques *Trojan Source*.
-fn limpiar_texto(texto: &str) -> String {
-    texto
-        .chars()
-        .filter(|c| !es_bidi(*c))
-        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
-        .collect()
-}
-
-/// Marcas de control bidireccional (embebidos, sobrescrituras, aislamientos y marcas).
-fn es_bidi(c: char) -> bool {
-    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}')
-}
-
 /// Colapsa espacios consecutivos y recorta extremos.
 fn normalizar_espacios(texto: &str) -> String {
     texto.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -361,6 +370,7 @@ mod tests {
         let d = sanitizar_html(
             b"<html><head><title> Mi &amp; Sitio </title><script>alert('x')</script></head><body><h1>Hola</h1><p>Mundo</p></body></html>",
             ORIGEN,
+            LimitesHtml::SIN_TOPES,
         );
         assert_eq!(d.titulo, "Mi & Sitio");
         assert_eq!(d.texto, "Hola\nMundo");
@@ -371,6 +381,7 @@ mod tests {
         let d = sanitizar_html(
             b"<a href=\"javascript:alert(1)\">a</a><a href='file:///C:/x'>b</a><a data-href=\"http://trampa.onion\" href=\"otra.html\">Otra <b>pagina</b></a><a href=data:text/html,x>d</a><a href=\"https://b.onion/\"></a>",
             ORIGEN,
+            LimitesHtml::SIN_TOPES,
         );
         let urls: Vec<&str> = d.enlaces.iter().map(|e| e.url.as_str()).collect();
         assert_eq!(
@@ -383,7 +394,11 @@ mod tests {
 
     #[test]
     fn filtra_bidi_y_controles() {
-        let d = sanitizar_html("<p>A\u{202E}txt.exe\u{1b}[31m</p>".as_bytes(), ORIGEN);
+        let d = sanitizar_html(
+            "<p>A\u{202E}txt.exe\u{1b}[31m</p>".as_bytes(),
+            ORIGEN,
+            LimitesHtml::SIN_TOPES,
+        );
         assert_eq!(d.texto, "Atxt.exe[31m");
     }
 
@@ -392,6 +407,7 @@ mod tests {
         let d = sanitizar_html(
             b"<!-- <a href=x> --> visible <script>if(a<b)x()</script>fin",
             ORIGEN,
+            LimitesHtml::SIN_TOPES,
         );
         assert_eq!(d.texto, "visible fin");
         assert!(d.enlaces.is_empty());
@@ -409,7 +425,7 @@ mod tests {
             "<añ",
             "<a b=ñ",
         ] {
-            let _ = sanitizar_html(entrada.as_bytes(), ORIGEN);
+            let _ = sanitizar_html(entrada.as_bytes(), ORIGEN, LimitesHtml::SIN_TOPES);
         }
     }
 }

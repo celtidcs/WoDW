@@ -1,7 +1,8 @@
 //! Decodificación de imágenes a RGBA puro con límites previos a la reserva de memoria.
 //!
 //! El resultado son solo píxeles: EXIF, perfiles ICC y cualquier fragmento
-//! auxiliar se pierden al no reconstruirse el contenedor original.
+//! auxiliar se pierden al no reconstruirse el contenedor original. Una imagen
+//! por encima del límite de resolución se rechaza leyendo solo su cabecera.
 
 use crate::configuracion::ConfiguracionWorker;
 use crate::ipc::mensajes::FormatoImagen;
@@ -39,10 +40,18 @@ pub fn decodificar_imagen(
     datos: &[u8],
     cfg: &ConfiguracionWorker,
 ) -> Result<ImagenRgba, RechazoImagen> {
-    if datos.is_empty() {
-        return Err(RechazoImagen::Invalida(
-            "datos de imagen vacíos".to_string(),
-        ));
+    comprobar_firma(formato, datos)?;
+    if formato == FormatoImagen::Avif {
+        return super::avif::decodificar_avif(datos, cfg);
+    }
+    let (ancho, alto) = ImageReader::with_format(Cursor::new(datos), formato_image(formato))
+        .into_dimensions()
+        .map_err(|e| RechazoImagen::Invalida(e.to_string()))?;
+    if !cfg.admite_resolucion(ancho, alto) {
+        return Err(RechazoImagen::ExcedeLimites(format!(
+            "{ancho}×{alto} supera el límite de {}×{}",
+            cfg.lado_largo_maximo_px, cfg.lado_corto_maximo_px
+        )));
     }
     let mut lector = ImageReader::with_format(Cursor::new(datos), formato_image(formato));
     lector.limits(limites(cfg));
@@ -50,6 +59,7 @@ pub fn decodificar_imagen(
         image::ImageError::Limits(detalle) => RechazoImagen::ExcedeLimites(detalle.to_string()),
         otro => RechazoImagen::Invalida(otro.to_string()),
     })?;
+    // `decode` solo lee el primer fotograma: un GIF animado se queda quieto.
     let rgba = imagen.into_rgba8();
     Ok(ImagenRgba {
         ancho: rgba.width(),
@@ -58,11 +68,36 @@ pub fn decodificar_imagen(
     })
 }
 
+/// `true` si la firma del contenido corresponde al formato declarado.
+pub fn firma_coincide(formato: FormatoImagen, datos: &[u8]) -> bool {
+    comprobar_firma(formato, datos).is_ok()
+}
+
+/// Exige que el contenido real (su firma) sea el formato declarado: un archivo
+/// disfrazado o políglota se rechaza antes de llegar a ningún decodificador.
+fn comprobar_firma(formato: FormatoImagen, datos: &[u8]) -> Result<(), RechazoImagen> {
+    if datos.is_empty() {
+        return Err(RechazoImagen::Invalida(
+            "datos de imagen vacíos".to_string(),
+        ));
+    }
+    match image::guess_format(datos) {
+        Ok(real) if real == formato_image(formato) => Ok(()),
+        Ok(real) => Err(RechazoImagen::Invalida(format!(
+            "declarada como {formato:?} pero el contenido es {real:?}"
+        ))),
+        Err(_) => Err(RechazoImagen::Invalida(format!(
+            "el contenido no tiene la firma de {formato:?}"
+        ))),
+    }
+}
+
 /// Límites de decodificación derivados de la configuración.
 fn limites(cfg: &ConfiguracionWorker) -> Limits {
     let mut limites = Limits::default();
-    limites.max_image_width = Some(cfg.ancho_maximo_imagen);
-    limites.max_image_height = Some(cfg.alto_maximo_imagen);
+    // Segunda barrera, por si un decodificador descubriera otras dimensiones.
+    limites.max_image_width = Some(cfg.lado_largo_maximo_px);
+    limites.max_image_height = Some(cfg.lado_largo_maximo_px);
     limites.max_alloc = Some(cfg.memoria_maxima_imagen_bytes);
     limites
 }
@@ -75,6 +110,10 @@ fn formato_image(formato: FormatoImagen) -> ImageFormat {
         FormatoImagen::Gif => ImageFormat::Gif,
         FormatoImagen::Webp => ImageFormat::WebP,
         FormatoImagen::Bmp => ImageFormat::Bmp,
+        FormatoImagen::Tiff => ImageFormat::Tiff,
+        FormatoImagen::Ico => ImageFormat::Ico,
+        FormatoImagen::Qoi => ImageFormat::Qoi,
+        FormatoImagen::Avif => ImageFormat::Avif,
     }
 }
 
@@ -120,7 +159,8 @@ mod tests {
     #[test]
     fn dimensiones_sobre_el_limite_se_rechazan_sin_decodificar() {
         let cfg = ConfiguracionWorker {
-            ancho_maximo_imagen: 1,
+            lado_largo_maximo_px: 1,
+            lado_corto_maximo_px: 1,
             ..Default::default()
         };
         assert!(matches!(

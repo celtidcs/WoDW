@@ -4,19 +4,32 @@
 //! El mismo binario actúa como Maestro (interfaz + red) o, con
 //! `--modo-worker`, como sub-Worker confinado.
 
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use std::process::ExitCode;
 use wodw::configuracion::ConfiguracionWodw;
 use wodw::maestro::iniciar_sesion;
 use wodw::seguridad::salida_inmediata;
+use wodw::seguridad::sin_volcados::{impedir_volcados, AsignadorSinVolcado};
 use wodw::ui::{self, textos, VentanaPrincipal};
 use wodw::worker::{self, ARGUMENTO_MODO_WORKER};
 
+/// Asignador que, si se agota la memoria, termina sin volcado (ver
+/// `seguridad::sin_volcados`).
+#[global_allocator]
+static ASIGNADOR: AsignadorSinVolcado = AsignadorSinVolcado;
+
 fn main() -> ExitCode {
+    impedir_volcados();
     let argumentos: Vec<String> = std::env::args().collect();
     let resultado = if argumentos.iter().any(|a| a == ARGUMENTO_MODO_WORKER) {
         worker::ejecutar_proceso_worker(&argumentos).map_err(|e| e.to_string())
     } else {
-        ejecutar_maestro(&argumentos)
+        let resultado = ejecutar_maestro(&argumentos);
+        // Cierre normal: se borra el perfil vacío del AppContainer de los Workers.
+        #[cfg(windows)]
+        worker::sandbox::appcontainer::borrar_perfil();
+        resultado
     };
     match resultado {
         Ok(()) => ExitCode::SUCCESS,
@@ -37,6 +50,7 @@ fn ejecutar_maestro(argumentos: &[String]) -> Result<(), String> {
         &textos::titulo_ventana(),
         opciones,
         Box::new(move |contexto| {
+            ui::fuentes::instalar(&contexto.egui_ctx);
             let repintar = contexto.egui_ctx.clone();
             let sesion =
                 iniciar_sesion(cfg.clone(), ejecutable, move || repintar.request_repaint())

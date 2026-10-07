@@ -35,8 +35,9 @@ justo eso, un fallo en alguna de esas piezas para salir del navegador y llegar a
 descubrir quién eres.
 
 WoDW renuncia a casi todo a cambio de seguridad. No ejecuta JavaScript ni nada que venga de la
-página. Solo muestra texto, enlaces e imágenes. Y aun así, desconfía de su propio código: lo poco
-que tiene que interpretar lo hace dentro de una jaula de la que no se puede salir.
+página. Muestra texto, enlaces, imágenes, audio y vídeo, pero nunca tal como llegan: todo se abre
+dentro de una jaula sin red de la que no se puede salir, y de allí solo sale reconstruido desde
+cero (letras limpias, píxeles nuevos, sonido nuevo).
 
 ## Cómo se ve
 
@@ -52,41 +53,60 @@ cierra la aplicación. Si dejas el ratón quieto sobre él, una viñeta te avisa
 
 ## Qué hace
 
-- **Navega por Tor sin instalar Tor.** Lo lleva dentro (`arti-client`, la implementación en Rust
-  del Proyecto Tor). No abre puertos en tu equipo y nunca usa el DNS del sistema.
-- **Separa tus pestañas.** Cada una sale por sus propios circuitos, así que un sitio no puede
-  relacionar lo que haces en dos pestañas distintas.
-- **Busca** en Ahmia, Torch o DuckDuckGo Onion, y puedes añadir otros buscadores.
-- **Muestra solo lo inofensivo**: el texto, el título y los enlaces de las páginas; las imágenes
-  rehechas píxel a píxel y sin metadatos; los audios WAV filtrados contra ultrasonidos. Ni
-  ejecutables, ni documentos, ni descargas.
-- **Se defiende sola.** Bloquea los sitios que envían cosas hostiles, cambia de circuitos, borra la
-  pestaña afectada y, si detecta un compromiso grave, lo borra todo y se cierra.
-- **No deja rastro** en la sesión: borra pestañas e historial tras 30 minutos sin uso y al cerrar.
-- **Oculta que usas Tor**, si quieres, con puentes obfs4 o Snowflake.
-- **Es portable**: un único ejecutable, sin instalación.
+WoDW navega por Tor sin que tengas que instalar Tor: lo lleva dentro, gracias a `arti-client`, la
+implementación en Rust del propio Proyecto Tor. No abre puertos en tu equipo y nunca pregunta al
+DNS del sistema. Cada pestaña sale por sus propios circuitos, así que un sitio no puede relacionar
+lo que haces en dos pestañas distintas. Para buscar trae Ahmia, Torch y DuckDuckGo Onion, y puedes
+añadir otros buscadores.
+
+Muestra texto, imágenes, audio y vídeo, pero siempre reconstruidos. Al texto se le quitan los
+caracteres invisibles y los trucos que invierten la dirección de la escritura, se normaliza, y si
+un enlace dice ir a un sitio pero lleva a otro, WoDW te avisa. Trae fuentes para leer alfabetos de
+todo el mundo: latino, cirílico, griego, árabe, chino, japonés, coreano y más. Las imágenes (PNG,
+JPEG, GIF, WebP, BMP, TIFF, ICO, QOI y AVIF, hasta 4K) se rehacen píxel a píxel y pierden todos sus
+metadatos. El audio (MP3, OGG/Vorbis, Opus, FLAC, WAV y AAC/M4A) se convierte siempre a 48 kHz,
+sin ultrasonidos y con un limitador que impide picos de volumen dañinos. Del vídeo (MP4 con H.264 y
+WebM con AV1, hasta 4K) se vuelve a dibujar cada fotograma desde sus píxeles y el sonido pasa por
+el mismo filtro, así que del archivo no sale nada más: ni metadatos, ni subtítulos, ni pistas
+ocultas. Nada suena ni se descarga por su cuenta: las imágenes, audios y vídeos de una página se
+listan y solo se abren cuando los pulsas. Ejecutables y documentos, ni eso.
+
+La aplicación se defiende sola. Bloquea los sitios que envían cosas hostiles, cambia de circuitos,
+borra la pestaña afectada y, si detecta un compromiso grave, lo borra todo y se cierra. Tampoco deja
+rastro: borra pestañas e historial tras 30 minutos sin uso y al cerrar, y ni siquiera un cierre
+brusco deja volcados de memoria en el disco.
+
+Si lo necesitas, puedes activar un registro de la sesión: tú eliges si apunta solo lo relacionado
+con la seguridad o todo, y si se guarda solo o cuando lo pides, y cada opción te explica sus
+consecuencias. Al abrirse, WoDW consulta GitHub a través de Tor y te avisa si hay una versión nueva,
+sin descargar nunca nada. Con puentes obfs4 o Snowflake puedes ocultar a tu proveedor de internet
+que usas Tor. Y es portable: un único ejecutable que no necesita instalación.
 
 ## Cómo lo hace
 
 **Dos papeles, un ejecutable.** El proceso que ves (el *Maestro*) lleva la ventana, Tor y el
 detector de incidentes. Cuando descarga algo, no lo abre él: lanza una copia de sí mismo en modo
-*Worker*, que se encierra, procesa ese único recurso, devuelve texto limpio o píxeles y muere. Hay
-un Worker nuevo para cada página, imagen o audio. Si un archivo malicioso consigue engañar al
-decodificador, se queda atrapado en un proceso que va a morir en milisegundos.
+*Worker*, que se encierra, procesa ese único recurso, devuelve texto limpio, píxeles o sonido y
+muere. Hay un Worker nuevo para cada página, imagen, audio o vídeo. Si un archivo malicioso consigue
+engañar al decodificador, se queda atrapado en un proceso sin red, con la memoria limitada y que
+morirá en cuanto termine.
 
-**La jaula.** Antes de leer un solo byte de fuera, el Worker se encierra:
-
-- En **Linux y Tails**, con Landlock (sin acceso al disco ni a la red) y dos filtros seccomp: uno
-  que lo mata si intenta abrir conexiones, ejecutar programas o espiar otros procesos, y otro que le
-  impide crear procesos. Además, muere si muere el Maestro.
-- En **Windows**, con las mitigaciones del sistema (sin procesos hijo, sin código generado al vuelo,
-  solo bibliotecas firmadas por Microsoft), con nivel de integridad baja (no puede escribir en tu
-  perfil) y dentro de un Job Object que lo mata si se cierra el Maestro.
+**La jaula.** Antes de leer un solo byte de fuera, el Worker se encierra. En **Linux y Tails** lo
+hace con Landlock, que le quita el acceso al disco y a la red, y con dos filtros seccomp: uno lo
+mata si intenta abrir conexiones, ejecutar programas o espiar otros procesos, y el otro le impide
+crear procesos. Además, muere si muere el Maestro. En **Windows** vive dentro de un **AppContainer
+sin permisos**, que le impide abrir cualquier conexión de red, ni siquiera local; tiene activadas
+las mitigaciones del sistema (sin procesos hijo, sin código generado al vuelo, solo bibliotecas
+firmadas por Microsoft) y está dentro de un Job Object que limita su memoria y lo mata si se cierra
+el Maestro.
 
 **Desconfianza a cada paso.** El cliente HTTP pone plazo a cada lectura, limita el tamaño de todo y
-rechaza las respuestas ambiguas o con caracteres colados. Las imágenes se miden antes de abrirlas,
-para frenar las «bombas» que ocupan gigas al descomprimirse. Y el Maestro vuelve a comprobar lo que
-le devuelve el Worker: tampoco se fía de él.
+rechaza las respuestas ambiguas o con caracteres colados. Cada archivo se identifica por su
+contenido, no por lo que dice el servidor; su estructura se revisa antes de entregarlo a ningún
+decodificador; y su tamaño en píxeles se mide antes de abrirlo, para frenar las «bombas» que ocupan
+gigas al descomprimirse. Solo se admite una lista cerrada de formatos, casi todos con decodificador
+escrito en Rust. Y el Maestro vuelve a comprobar todo lo que le devuelve el Worker: tampoco se fía
+de él.
 
 **Respuesta automática.** Un detector de incidentes (IDS) clasifica lo que pasa por gravedad y
 actúa sin preguntarte. Si el Worker intenta salir de su jaula, o algún señuelo en disco o en
@@ -97,21 +117,24 @@ Todos los detalles están en la [arquitectura](documentacion/arquitectura.md).
 
 ## Lo que no hace
 
-- No ejecuta JavaScript, así que muchas webs modernas no se verán bien o no funcionarán.
-- No reproduce audio ni vídeo, ni abre documentos.
-- No te hace invisible: si inicias sesión con tu nombre o das datos personales, ningún programa
-  puede protegerte de eso.
-- Tiene limitaciones técnicas conocidas, por ejemplo que en Windows el Worker todavía puede abrir
-  conexiones de red. Están todas en [defectos conocidos](documentacion/defectos-conocidos.md).
+WoDW no ejecuta JavaScript, así que muchas webs modernas no se verán bien o directamente no
+funcionarán. Tampoco abre documentos, como PDF u Office, ni ningún formato fuera de su lista
+cerrada; por ejemplo, los vídeos VP8, VP9 u Ogg Theora no se reproducen. En árabe, persa y jemer
+las letras se ven, pero sueltas, sin unirse ni reordenarse como lo haría un navegador corriente.
+
+Y no te hace invisible: si inicias sesión con tu nombre o das datos personales, ningún programa
+puede protegerte de eso. El resto de limitaciones técnicas conocidas están en
+[defectos conocidos](documentacion/defectos-conocidos.md).
 
 ## Usarla
 
 En [Releases](https://github.com/celtidcs/WoDW/releases) hay dos descargas:
 
-- **Windows** (10 u 11, 64 bits): `wodw-0.1.0-windows-x86_64.exe`. Ábrelo y listo; no se instala.
-- **Linux** (64 bits): `wodw-0.1.0-linux-x86_64.tar.gz`. Descomprímelo y ejecuta `./wodw`. Necesita
-  glibc 2.39 o posterior y OpenSSL 3, es decir, Debian 13, Ubuntu 24.04, Tails 7 o más recientes.
-  En distribuciones más antiguas, compílalo tú (abajo se explica cómo).
+- **Windows** (10 u 11, 64 bits): `wodw-0.2.0-windows-x86_64.exe`. Ábrelo y listo; no se instala.
+- **Linux** (64 bits): `wodw-0.2.0-linux-x86_64.tar.gz`. Descomprímelo y ejecuta `./wodw`. Necesita
+  glibc 2.39 o posterior, OpenSSL 3 y la biblioteca de sonido ALSA (`libasound2`), es decir,
+  Debian 13, Ubuntu 24.04, Tails 7 o más recientes. En distribuciones más antiguas, compílalo tú
+  (abajo se explica cómo).
 
 `SHA256SUMS.txt` trae las huellas de cada archivo para comprobar que la descarga está íntegra.
 
@@ -122,8 +145,9 @@ configurarla está en el [manual de uso](documentacion/manual-de-uso.md). Para a
 ## Compilar y ejecutar
 
 Necesitas [Rust](https://rustup.rs) estable. En Windows, además, Visual Studio Build Tools con
-«Desarrollo para el escritorio con C++». En Linux, las bibliotecas de la
-[lista de requisitos](documentacion/infraestructura/requisitos.md).
+«Desarrollo para el escritorio con C++» (también compila el decodificador H.264). En Linux, un
+compilador de C y las bibliotecas de la [lista de requisitos](documentacion/infraestructura/requisitos.md),
+entre ellas las de sonido ALSA (`libasound2-dev` en Debian y Ubuntu).
 
 ```bash
 git clone https://github.com/celtidcs/WoDW.git
@@ -154,8 +178,11 @@ scripts que preparan el entorno en Windows y en Linux.
 
 ## Estado del proyecto
 
-Versión **0.1.0**, la primera publicada. Probada en Windows 11 y en Linux (Debian 13). En Tails
-todavía no se ha probado.
+Versión **0.2.0**. Es la primera que reproduce audio y vídeo, y corrige un fallo de seguridad
+importante de la 0.1.0: en Windows, el botón del pánico dejaba en el disco una copia de la memoria
+de la sesión (en los [defectos conocidos](documentacion/defectos-conocidos.md) se explica cómo
+borrarla). Probada en Windows 11 y en Linux (Debian 13), también navegando de verdad por servicios
+onion. En Tails todavía no se ha probado.
 
 Hay un detalle temporal: Arti 0.47 se bloquea al arrancar en Windows por un fallo en una de sus
 dependencias, ya reportado a sus desarrolladores. Mientras lo corrigen, WoDW incluye una copia
@@ -178,6 +205,11 @@ quien lo usa solo merece confianza si cualquiera puede leer su código y comprob
 dice; una versión cerrada no podría demostrarlo. Lo que se construya encima vuelve a todos.
 
 La copia de `saturating-time` incluida en `parches/` conserva su licencia original (MIT o
-Apache-2.0), compatible con la GPL.
+Apache-2.0), compatible con la GPL. Las fuentes de `recursos/fuentes/` conservan las suyas (SIL Open
+Font License 1.1 y Apache-2.0), cuyos textos van junto a ellas.
+
+El vídeo H.264 se decodifica con OpenH264 de Cisco, compilado desde su código fuente (licencia
+BSD-2). H.264 está sujeto a patentes en algunos países; la licencia de patentes que Cisco cubre se
+aplica solo a los binarios que distribuye la propia Cisco, no a este decodificador compilado aquí.
 
 Se entrega **sin ninguna garantía**, como dice la licencia.

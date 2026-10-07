@@ -77,10 +77,14 @@ where
 }
 
 /// Canal bidireccional asíncrono para intercambio de mensajes estructurados entre procesos.
+///
+/// Cada dirección tiene su propio límite: el Maestro envía archivos enteros al
+/// Worker, pero solo acepta de él bloques del tamaño de un fotograma.
 pub struct CanalIpc<R, W> {
     lector: R,
     escritor: W,
-    limite: usize,
+    limite_entrada: usize,
+    limite_salida: usize,
 }
 
 impl<R, W> CanalIpc<R, W>
@@ -88,23 +92,36 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    /// Inicializa un canal IPC con un límite de `limite` bytes por trama.
+    /// Inicializa un canal IPC con el mismo límite de `limite` bytes por trama
+    /// en ambas direcciones.
     pub fn nuevo(lector: R, escritor: W, limite: usize) -> Self {
+        Self::con_limites(lector, escritor, limite, limite)
+    }
+
+    /// Inicializa un canal IPC con límites distintos para lo que recibe
+    /// (`limite_entrada`) y lo que envía (`limite_salida`).
+    pub fn con_limites(
+        lector: R,
+        escritor: W,
+        limite_entrada: usize,
+        limite_salida: usize,
+    ) -> Self {
         Self {
             lector,
             escritor,
-            limite,
+            limite_entrada,
+            limite_salida,
         }
     }
 
     /// Envía un mensaje tipado a través del canal enmarcado.
     pub async fn enviar<M: serde::Serialize>(&mut self, mensaje: &M) -> Resultado<()> {
-        escribir_mensaje_framed(&mut self.escritor, mensaje, self.limite).await
+        escribir_mensaje_framed(&mut self.escritor, mensaje, self.limite_salida).await
     }
 
     /// Recibe el siguiente mensaje tipado disponible en el canal.
     pub async fn recibir<M: for<'de> serde::Deserialize<'de>>(&mut self) -> Resultado<Option<M>> {
-        leer_mensaje_framed(&mut self.lector, self.limite).await
+        leer_mensaje_framed(&mut self.lector, self.limite_entrada).await
     }
 }
 
@@ -149,6 +166,8 @@ mod tests {
                 texto: "Inicio".to_string(),
                 url: "http://target.onion/".to_string(),
             }],
+            medios: vec![],
+            recortado: false,
         };
 
         canal_worker.enviar(&respuesta).await.unwrap();

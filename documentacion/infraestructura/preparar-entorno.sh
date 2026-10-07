@@ -29,7 +29,7 @@ rustup component add rustfmt clippy || true
 # 4. Paquetes del sistema (solo Debian/Ubuntu/Tails con apt).
 #    native-tls necesita OpenSSL; la interfaz egui necesita las bibliotecas de X11/Wayland
 #    (lista tomada del README de egui; no comprobada todavía en esta máquina).
-PAQUETES="build-essential pkg-config libssl-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev"
+PAQUETES="build-essential pkg-config libssl-dev libasound2-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev"
 if command -v dpkg-query &> /dev/null; then
     FALTAN=""
     for paquete in $PAQUETES; do

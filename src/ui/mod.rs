@@ -4,8 +4,12 @@ pub mod antifingerprint;
 pub mod app;
 pub mod contenido;
 pub mod estado;
+pub mod fuentes;
 pub mod icono;
 pub mod motores;
+pub mod panel_registro;
+pub mod reproductor;
+pub mod salida_audio;
 pub mod telemetria;
 pub mod textos;
 

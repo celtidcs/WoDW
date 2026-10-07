@@ -3,7 +3,8 @@
 Pensada para alguien que no conoce el proyecto.
 
 1. **Instalar Rust**: https://rustup.rs (canal estable).
-2. **Herramientas del sistema**: ver [requisitos.md](requisitos.md).
+2. **Herramientas del sistema**: ver [requisitos.md](requisitos.md). En Linux hacen falta, entre
+   otras, `build-essential` (compila el decodificador H.264) y `libasound2-dev` (sonido).
 3. **Obtener el código**: `git clone https://github.com/celtidcs/WoDW.git` y entrar en la carpeta.
 4. **Preparar el entorno** (instala componentes, compila y ejecuta las pruebas):
    - Windows (PowerShell): `powershell -ExecutionPolicy Bypass -File documentacion/infraestructura/preparar-entorno.ps1`

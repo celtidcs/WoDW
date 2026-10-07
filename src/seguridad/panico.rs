@@ -12,12 +12,14 @@ pub fn purgar_cadenas<'a>(cadenas: impl IntoIterator<Item = &'a mut String>) {
     }
 }
 
-/// Termina el proceso de inmediato sin ejecutar destructores ni vaciar búferes.
+/// Termina el proceso de inmediato sin ejecutar destructores, sin vaciar
+/// búferes y **sin volcado de memoria** (ver [`super::sin_volcados`]: `abort()`
+/// dejaba un volcado de la sesión en el disco).
 ///
 /// Los sub-Workers mueren con el Maestro: en Windows por el Job Object con
 /// `KILL_ON_JOB_CLOSE`; en Linux por `PR_SET_PDEATHSIG`.
 pub fn salida_inmediata() -> ! {
-    std::process::abort()
+    super::sin_volcados::terminar()
 }
 
 #[cfg(test)]

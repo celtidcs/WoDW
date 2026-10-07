@@ -1,6 +1,6 @@
 [package]
 name = "wodw"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["celtidcs"]
 description = "Navegador de escritorio de solo lectura para la red Tor, con Tor incluido y cada página procesada en un proceso aislado y desechable."
@@ -31,7 +31,22 @@ toml = "0.8"
 url = "2.5"
 native-tls = "0.2"
 tokio-native-tls = "0.3"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico", "qoi"] }
+# AVIF y vídeo AV1: contenedor AVIF y decodificador AV1 en Rust (traducción de dav1d), sin
+# ensamblador y solo 8 bits para reducir la superficie de ataque.
+avif-parse = "2"
+# Audio: contenedores y códecs en Rust sin `unsafe` (solo los de la lista cerrada de WoDW).
+symphonia = { version = "0.6", default-features = false, features = ["mp3", "vorbis", "flac", "wav", "pcm", "aac", "isomp4", "ogg", "mkv"] }
+opus-decoder = "0.1"
+# Vídeo: contenedores en Rust; H.264 con OpenH264 de Cisco (C, compilado desde su fuente) que
+# solo se ejecuta dentro del Worker confinado y sin red.
+openh264 = { version = "0.9", default-features = false, features = ["source"] }
+re_rav1d = { version = "0.1", default-features = false, features = ["bitdepth_8"] }
+unicode-normalization = "0.1"
+cpal = "0.18"
+matroska-demuxer = "0.8"
+re_mp4 = "0.5"
+serde_json = "1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.52", features = [
@@ -42,6 +57,12 @@ windows-sys = { version = "0.52", features = [
     "Win32_Security_Isolation",
     "Win32_System_Memory",
     "Win32_System_SystemServices",
+    "Win32_System_Pipes",
+    "Win32_System_Kernel",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_Shell",
+    "Win32_System_Diagnostics_Debug",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

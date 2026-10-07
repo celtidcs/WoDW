@@ -1,6 +1,14 @@
 //! Interpretación estricta de la cabecera de una respuesta HTTP/1.1.
 
 use crate::error::{ErrorApp, Resultado};
+use std::ops::RangeInclusive;
+
+/// Redirecciones que llevan `Location` (RFC 9110 §15.4): 301, 302, 303, 307 y 308.
+const CODIGOS_REDIRECCION: [u16; 5] = [301, 302, 303, 307, 308];
+/// Un código de estado tiene siempre tres cifras (RFC 9110 §15).
+const CODIGOS_VALIDOS: RangeInclusive<u16> = 100..=999;
+/// Partes de la línea de estado: versión, código y frase.
+const PARTES_LINEA_ESTADO: usize = 3;
 
 /// Prefijo de versión aceptado en la línea de estado.
 const PREFIJO_VERSION_HTTP1: &str = "HTTP/1.";
@@ -59,7 +67,7 @@ impl RespuestaHttp {
 
     /// Indica si el código es una redirección que lleva `Location`.
     pub fn es_redireccion(&self) -> bool {
-        matches!(self.codigo_estado, 301 | 302 | 303 | 307 | 308)
+        CODIGOS_REDIRECCION.contains(&self.codigo_estado)
     }
 }
 
@@ -114,7 +122,7 @@ pub(crate) fn interpretar_cabecera(bytes: &[u8]) -> Resultado<CabeceraRespuesta>
 
 /// Interpreta `HTTP/1.x NNN frase`.
 fn interpretar_linea_estado(linea: &str) -> Resultado<(u16, String)> {
-    let mut partes = linea.splitn(3, ' ');
+    let mut partes = linea.splitn(PARTES_LINEA_ESTADO, ' ');
     let version = partes.next().unwrap_or_default();
     if !version.starts_with(PREFIJO_VERSION_HTTP1) {
         return Err(ErrorApp::ProtocoloHttp(format!(
@@ -126,7 +134,7 @@ fn interpretar_linea_estado(linea: &str) -> Resultado<(u16, String)> {
     let codigo = codigo_texto
         .parse::<u16>()
         .ok()
-        .filter(|c| (100..=999).contains(c))
+        .filter(|c| CODIGOS_VALIDOS.contains(c))
         .ok_or_else(|| {
             ErrorApp::ProtocoloHttp(format!(
                 "código de estado inválido: «{}»",

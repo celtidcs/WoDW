@@ -6,7 +6,7 @@
 #[test]
 fn proceso_confinado_no_escribe_disco_ni_lanza_procesos() {
     let ruta = std::env::temp_dir().join(format!("wodw_sandbox_{}.txt", std::process::id()));
-    wodw::worker::sandbox::aplicar_sandbox_proceso_actual()
+    wodw::worker::sandbox::aplicar_sandbox_proceso_actual(u64::MAX)
         .expect("el confinamiento debe aplicarse");
 
     let escritura = std::fs::write(&ruta, b"escape");

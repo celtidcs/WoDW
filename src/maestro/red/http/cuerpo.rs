@@ -47,9 +47,18 @@ pub(crate) async fn leer_cuerpo<S: AsyncRead + Unpin>(
     }
 }
 
+/// Respuestas informativas (1xx).
+const CODIGOS_INFORMATIVOS: std::ops::Range<u16> = 100..200;
+/// 204 No Content.
+const CODIGO_SIN_CONTENIDO: u16 = 204;
+/// 304 Not Modified.
+const CODIGO_NO_MODIFICADO: u16 = 304;
+
 /// Códigos que nunca llevan cuerpo (RFC 9112 §6.3).
 fn sin_cuerpo(codigo: u16) -> bool {
-    (100..200).contains(&codigo) || codigo == 204 || codigo == 304
+    CODIGOS_INFORMATIVOS.contains(&codigo)
+        || codigo == CODIGO_SIN_CONTENIDO
+        || codigo == CODIGO_NO_MODIFICADO
 }
 
 /// `Transfer-Encoding` solo se admite como `chunked` final; cualquier otra

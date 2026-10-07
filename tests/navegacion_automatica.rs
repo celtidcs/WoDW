@@ -131,6 +131,7 @@ async fn navegacion_sigue_redirecciones_y_procesa_el_documento() {
         titulo,
         texto,
         enlaces,
+        ..
     } = r.contenido
     else {
         panic!("se esperaba documento");

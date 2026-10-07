@@ -7,10 +7,15 @@
 
 pub mod incidentes;
 
+use crate::configuracion::ConfiguracionWorker;
 use crate::error::{ErrorApp, Resultado};
-use crate::ipc::mensajes::{Enlace, FormatoImagen, OrdenWorker, RespuestaWorker};
+use crate::ipc::mensajes::{
+    rgba_cuadra, Enlace, FamiliaMedio, FormatoImagen, MedioEnlazado, OrdenWorker, RespuestaWorker,
+};
 use crate::maestro::proceso_worker::ProcesadorSubworker;
 use crate::maestro::red::{ClienteTor, RespuestaHttp};
+use crate::seguridad::enlaces::{evaluar_enlace, AvisoEnlace};
+use crate::seguridad::texto::{limpiar_texto, recortar};
 use incidentes::{clasificar, RespuestaAutomatica};
 use std::future::Future;
 use std::pin::Pin;
@@ -66,6 +71,30 @@ impl ProcesadorContenido for ProcesadorSubworker {
     }
 }
 
+/// Enlace listo para mostrar, con su aviso si parece engañoso.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnlaceRevisado {
+    /// Texto visible ya limpio.
+    pub texto: String,
+    /// URL absoluta de destino.
+    pub url: String,
+    /// Aviso de enlace engañoso u homógrafo, si procede.
+    pub aviso: Option<AvisoEnlace>,
+}
+
+impl EnlaceRevisado {
+    /// Limpia el texto de `enlace` y evalúa si es engañoso.
+    fn desde(enlace: Enlace) -> Self {
+        let texto = limpiar_texto(&enlace.texto);
+        let aviso = evaluar_enlace(&texto, &enlace.url);
+        Self {
+            texto,
+            url: enlace.url,
+            aviso,
+        }
+    }
+}
+
 /// Contenido presentable de una página.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContenidoPagina {
@@ -75,8 +104,12 @@ pub enum ContenidoPagina {
         titulo: String,
         /// Texto visible.
         texto: String,
-        /// Enlaces http/https.
-        enlaces: Vec<Enlace>,
+        /// Enlaces http/https revisados.
+        enlaces: Vec<EnlaceRevisado>,
+        /// Medios incrustados, sin descargar (se abren al pulsarlos).
+        medios: Vec<MedioEnlazado>,
+        /// Si el texto se recortó por superar el tope de caracteres.
+        recortado: bool,
     },
     /// Imagen decodificada a RGBA.
     Imagen {
@@ -87,14 +120,15 @@ pub enum ContenidoPagina {
         /// Píxeles RGBA.
         rgba: Vec<u8>,
     },
-    /// Audio filtrado (sin reproducción: solo se informa).
-    Audio {
-        /// Frecuencia de muestreo.
-        frecuencia_muestreo: u32,
-        /// Canales.
-        canales: u16,
-        /// Muestras por canal.
-        muestras_por_canal: usize,
+    /// Audio o vídeo descargado y **sin abrir**: solo se decodifica, en un
+    /// sub-Worker sin red, cuando el usuario pulsa «Reproducir».
+    Medio {
+        /// Familia declarada.
+        familia: FamiliaMedio,
+        /// Tipo MIME declarado.
+        tipo_mime: String,
+        /// Bytes del archivo tal como llegaron (se borran al purgar).
+        datos: Vec<u8>,
     },
     /// Tipo no soportado: no se procesa ni se descarga a disco.
     NoSoportado {
@@ -130,6 +164,7 @@ pub struct ServicioNavegacion<F, P> {
     respuesta: RespuestaAutomatica,
     max_redirecciones: u8,
     siguiente_tarea: AtomicU64,
+    limites: ConfiguracionWorker,
 }
 
 impl<F: FuenteHttp, P: ProcesadorContenido> ServicioNavegacion<F, P> {
@@ -146,7 +181,16 @@ impl<F: FuenteHttp, P: ProcesadorContenido> ServicioNavegacion<F, P> {
             respuesta,
             max_redirecciones,
             siguiente_tarea: AtomicU64::new(1),
+            limites: ConfiguracionWorker::default(),
         }
+    }
+
+    /// Fija los límites de texto e imagen que el Maestro vuelve a comprobar en
+    /// cada respuesta del Worker (por defecto, los de la configuración por defecto).
+    #[must_use]
+    pub fn con_limites(mut self, cfg: &ConfiguracionWorker) -> Self {
+        self.limites = cfg.clone();
+        self
     }
 
     /// Fuente HTTP subyacente.
@@ -205,7 +249,7 @@ impl<F: FuenteHttp, P: ProcesadorContenido> ServicioNavegacion<F, P> {
                 .fuente
                 .obtener(id_pestana, &url)
                 .await
-                .map_err(|e| self.tratar(&host, e))?;
+                .map_err(|e| self.responder_a_fallo(&host, e))?;
             match respuesta
                 .cabecera("location")
                 .filter(|_| respuesta.es_redireccion())
@@ -235,6 +279,13 @@ impl<F: FuenteHttp, P: ProcesadorContenido> ServicioNavegacion<F, P> {
         let host = url.host_str().unwrap_or_default();
         let id_tarea = self.siguiente_tarea.fetch_add(1, Ordering::Relaxed);
         let tipo = tipo_mime(&respuesta);
+        if let Some(familia) = FamiliaMedio::desde_mime(&tipo) {
+            return Ok(ContenidoPagina::Medio {
+                familia,
+                tipo_mime: tipo,
+                datos: respuesta.en_cuerpo(),
+            });
+        }
         let Some(orden) = orden_para(&tipo, id_tarea, url, respuesta.en_cuerpo()) else {
             return Ok(ContenidoPagina::NoSoportado { tipo_mime: tipo });
         };
@@ -242,12 +293,13 @@ impl<F: FuenteHttp, P: ProcesadorContenido> ServicioNavegacion<F, P> {
             .procesador
             .procesar(&orden)
             .await
-            .and_then(contenido_desde_respuesta);
-        resultado.map_err(|e| self.tratar(host, e))
+            .and_then(|r| contenido_desde_respuesta(r, &self.limites));
+        resultado.map_err(|e| self.responder_a_fallo(host, e))
     }
 
-    /// Aplica la respuesta automática si el error es un incidente.
-    fn tratar(&self, host: &str, error: ErrorApp) -> FalloNavegacion {
+    /// Aplica la respuesta automática si el error es un incidente: lo usan la
+    /// navegación y la reproducción de medios.
+    pub fn responder_a_fallo(&self, host: &str, error: ErrorApp) -> FalloNavegacion {
         match clasificar(host, &error) {
             Some(incidente) => {
                 self.respuesta.responder(host, &incidente);
@@ -259,6 +311,22 @@ impl<F: FuenteHttp, P: ProcesadorContenido> ServicioNavegacion<F, P> {
             None => fallo(&error),
         }
     }
+}
+
+/// Esquemas admitidos en la URL de un medio incrustado.
+const ESQUEMAS_MEDIOS: &[&str] = &["http", "https"];
+
+/// Revalida los medios de un Worker: solo http/https, texto limpio y con tope.
+fn revisar_medios(medios: Vec<MedioEnlazado>, maximo: usize) -> Vec<MedioEnlazado> {
+    medios
+        .into_iter()
+        .filter(|m| Url::parse(&m.url).is_ok_and(|u| ESQUEMAS_MEDIOS.contains(&u.scheme())))
+        .take(maximo)
+        .map(|m| MedioEnlazado {
+            texto: limpiar_texto(&m.texto),
+            ..m
+        })
+        .collect()
 }
 
 /// Fallo ordinario sin incidente.
@@ -281,13 +349,8 @@ fn tipo_mime(respuesta: &RespuestaHttp) -> String {
         .to_ascii_lowercase()
 }
 
-/// Bytes por píxel RGBA.
-const BYTES_POR_PIXEL_RGBA: usize = 4;
-
 /// Tipos tratados como documento de texto.
 const TIPOS_DOCUMENTO: &[&str] = &["text/html", "application/xhtml+xml", "text/plain"];
-/// Tipos tratados como audio WAV.
-const TIPOS_WAV: &[&str] = &["audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"];
 
 /// Orden de Worker adecuada para el tipo, o `None` si no se soporta.
 fn orden_para(tipo: &str, id_tarea: u64, url: &Url, cuerpo: Vec<u8>) -> Option<OrdenWorker> {
@@ -298,71 +361,97 @@ fn orden_para(tipo: &str, id_tarea: u64, url: &Url, cuerpo: Vec<u8>) -> Option<O
             contenido_html: cuerpo,
         });
     }
-    if let Some(formato) = FormatoImagen::desde_mime(tipo) {
-        return Some(OrdenWorker::ProcesarImagen {
-            id_tarea,
-            formato,
-            datos_crudos: cuerpo,
-        });
+    FormatoImagen::desde_mime(tipo).map(|formato| OrdenWorker::ProcesarImagen {
+        id_tarea,
+        formato,
+        datos_crudos: cuerpo,
+    })
+}
+
+/// Documento tal como lo entrega el Worker, antes de revisarlo.
+struct DocumentoRecibido {
+    titulo: String,
+    texto_limpio: String,
+    enlaces: Vec<Enlace>,
+    medios: Vec<MedioEnlazado>,
+    recortado: bool,
+}
+
+/// Repite la limpieza del texto, aplica el tope de caracteres y revisa
+/// enlaces y medios.
+fn documento_revisado(doc: DocumentoRecibido, limites: &ConfiguracionWorker) -> ContenidoPagina {
+    let (texto, recortado_aqui) = recortar(
+        limpiar_texto(&doc.texto_limpio),
+        limites.max_caracteres_texto,
+    );
+    ContenidoPagina::Documento {
+        titulo: limpiar_texto(&doc.titulo),
+        texto,
+        enlaces: doc.enlaces.into_iter().map(EnlaceRevisado::desde).collect(),
+        medios: revisar_medios(doc.medios, limites.max_medios_por_pagina),
+        recortado: doc.recortado || recortado_aqui,
     }
-    TIPOS_WAV
-        .contains(&tipo)
-        .then_some(OrdenWorker::ProcesarAudio {
-            id_tarea,
-            datos_crudos: cuerpo,
-        })
+}
+
+/// Exige que la imagen esté dentro del límite y que sus píxeles cuadren.
+fn imagen_revisada(
+    ancho: u32,
+    alto: u32,
+    rgba: Vec<u8>,
+    limites: &ConfiguracionWorker,
+) -> Resultado<ContenidoPagina> {
+    if !limites.admite_resolucion(ancho, alto) {
+        return Err(ErrorApp::ContenidoHostil(format!(
+            "imagen de {ancho}×{alto} por encima del límite de resolución"
+        )));
+    }
+    if !rgba_cuadra(ancho, alto, rgba.len()) {
+        return Err(ErrorApp::ContenidoHostil(
+            "imagen con dimensiones incoherentes con sus píxeles".to_string(),
+        ));
+    }
+    Ok(ContenidoPagina::Imagen { ancho, alto, rgba })
 }
 
 /// Traduce la respuesta del Worker a contenido o error tipado.
-fn contenido_desde_respuesta(respuesta: RespuestaWorker) -> Resultado<ContenidoPagina> {
+///
+/// La respuesta del Worker tampoco es confiable: un Worker comprometido podría
+/// colar caracteres invisibles o Bidi, texto sin tope o imágenes que no cuadran.
+fn contenido_desde_respuesta(
+    respuesta: RespuestaWorker,
+    limites: &ConfiguracionWorker,
+) -> Resultado<ContenidoPagina> {
     match respuesta {
         RespuestaWorker::HtmlProcesado {
             titulo,
             texto_limpio,
             enlaces,
+            medios,
+            recortado,
             ..
-        } => Ok(ContenidoPagina::Documento {
-            titulo,
-            texto: texto_limpio,
-            enlaces,
-        }),
+        } => Ok(documento_revisado(
+            DocumentoRecibido {
+                titulo,
+                texto_limpio,
+                enlaces,
+                medios,
+                recortado,
+            },
+            limites,
+        )),
         RespuestaWorker::ImagenProcesada {
             ancho,
             alto,
             datos_rgba,
             ..
-        } => {
-            // La respuesta del Worker tampoco es confiable: un Worker comprometido
-            // podría declarar dimensiones incoherentes con el búfer.
-            let esperado = (ancho as usize)
-                .checked_mul(alto as usize)
-                .and_then(|pixeles| pixeles.checked_mul(BYTES_POR_PIXEL_RGBA));
-            if esperado != Some(datos_rgba.len()) {
-                return Err(ErrorApp::ContenidoHostil(
-                    "imagen con dimensiones incoherentes con sus píxeles".to_string(),
-                ));
-            }
-            Ok(ContenidoPagina::Imagen {
-                ancho,
-                alto,
-                rgba: datos_rgba,
-            })
-        }
-        RespuestaWorker::AudioProcesado {
-            frecuencia_muestreo,
-            canales,
-            muestras_pcm,
-            ..
-        } => Ok(ContenidoPagina::Audio {
-            frecuencia_muestreo,
-            canales,
-            muestras_por_canal: muestras_pcm.len() / usize::from(canales.max(1)),
-        }),
+        } => imagen_revisada(ancho, alto, datos_rgba, limites),
         RespuestaWorker::AlertaSeguridad {
             vector, mensaje, ..
         } => Err(ErrorApp::ContenidoHostil(format!("{vector}: {mensaje}"))),
         RespuestaWorker::ErrorTarea { mensaje, .. } => Err(ErrorApp::Proceso(mensaje)),
-        RespuestaWorker::Pong { .. } => Err(ErrorApp::Proceso(
+        RespuestaWorker::Pong { .. }
+        | RespuestaWorker::MedioAbierto { .. }
+        | RespuestaWorker::BloqueMedio { .. } => Err(ErrorApp::Proceso(
             "respuesta inesperada del Worker".to_string(),
         )),
     }

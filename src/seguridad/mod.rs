@@ -1,8 +1,12 @@
-//! Tecnología de engaño, purga amnésica y mitigaciones reactivas.
+//! Tecnología de engaño, purga amnésica, mitigaciones reactivas e higiene del
+//! contenido mostrado (texto y enlaces).
 
 pub mod canarios;
+pub mod enlaces;
 pub mod honeypot;
 pub mod panico;
+pub mod sin_volcados;
+pub mod texto;
 
 pub use canarios::GestorCanarios;
 pub use honeypot::{HoneypotRam, TrampaMemoria};

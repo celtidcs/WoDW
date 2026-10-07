@@ -1,24 +1,18 @@
-//! Ventana principal: une el estado del navegador, la sesión del Maestro y los
-//! paneles de `egui`.
-//!
-//! La ventana reacciona sola, sin que el usuario tenga que pulsar nada: aplica
-//! los resultados de la sesión, ejecuta el pánico automático que ordene el IDS,
-//! purga por inactividad y purga al cerrarse.
+//! Dibujado de la ventana en cada fotograma y recogida de lo que pulsa el
+//! usuario. Lo que esas pulsaciones provocan vive en el módulo padre.
 
-use crate::configuracion::ConfiguracionWodw;
+use super::VentanaPrincipal;
 use crate::ids::motor::ResumenTelemetria;
-use crate::maestro::sesion::{ConexionSesion, EventoSesion, OrdenSesion};
+use crate::maestro::navegacion::ContenidoPagina;
+use crate::maestro::sesion::OrdenSesion;
 use crate::ui::antifingerprint::{calcular_letterboxing, COLOR_FONDO_LETTERBOXING};
-use crate::ui::contenido::{mostrar_pestana, CacheImagen};
-use crate::ui::estado::{EstadoNavegador, ParametrosEstado, SolicitudNavegacion};
-use crate::ui::motores::CatalogoMotores;
+use crate::ui::contenido::mostrar_pestana;
+use crate::ui::estado::EstadoContenido;
+use crate::ui::reproductor::AccionReproductor;
 use crate::ui::telemetria::{indicador_cabecera, panel_telemetria};
 use crate::ui::textos;
 use egui::{Align, Layout, RichText, ScrollArea, Ui};
 use std::time::{Duration, Instant};
-
-/// Acción ejecutada tras la purga del pánico cuando `panico.abortar_proceso` es `true`.
-pub type AccionSalida = Box<dyn Fn()>;
 
 /// Frecuencia mínima de repintado para comprobar la inactividad sin eventos.
 const INTERVALO_REVISION: Duration = Duration::from_secs(1);
@@ -29,131 +23,7 @@ const RADIO_CONTENIDO: f32 = 4.0;
 /// Separación superior del contenido.
 const MARGEN_CONTENIDO: f32 = 12.0;
 
-/// Ventana principal de WoDW.
-pub struct VentanaPrincipal {
-    estado: EstadoNavegador,
-    catalogo: CatalogoMotores,
-    sesion: Option<ConexionSesion>,
-    cfg: ConfiguracionWodw,
-    mensaje_estado: String,
-    mostrar_telemetria: bool,
-    cache_imagen: CacheImagen,
-    accion_salida: AccionSalida,
-}
-
 impl VentanaPrincipal {
-    /// Crea la ventana. Sin sesión, la interfaz funciona pero no navega.
-    pub fn nueva(
-        cfg: ConfiguracionWodw,
-        sesion: Option<ConexionSesion>,
-        accion_salida: AccionSalida,
-    ) -> Self {
-        let minutos = cfg.automatizacion.minutos_inactividad_purga;
-        let parametros = ParametrosEstado {
-            pulsaciones_panico: cfg.panico.pulsaciones,
-            ventana_panico: Duration::from_millis(cfg.panico.ventana_ms),
-            inactividad_purga: (minutos > 0).then(|| Duration::from_secs(minutos * 60)),
-        };
-        let mensaje_estado = if sesion.is_some() {
-            String::new()
-        } else {
-            textos::SIN_SESION.to_string()
-        };
-        Self {
-            estado: EstadoNavegador::nuevo(parametros, Instant::now()),
-            catalogo: CatalogoMotores::desde_configuracion(&cfg.motores),
-            sesion,
-            cfg,
-            mensaje_estado,
-            mostrar_telemetria: false,
-            cache_imagen: CacheImagen::default(),
-            accion_salida,
-        }
-    }
-
-    /// Estado del navegador (solo lectura).
-    pub fn estado(&self) -> &EstadoNavegador {
-        &self.estado
-    }
-
-    /// Mensaje de la barra de estado.
-    pub fn mensaje_estado(&self) -> &str {
-        &self.mensaje_estado
-    }
-
-    /// Navega a lo escrito en la barra (URL o búsqueda).
-    pub fn ir_a(&mut self, entrada: &str) {
-        if let Some(direccion) = self.catalogo.resolver_entrada(entrada) {
-            let solicitud = self.estado.navegar(direccion);
-            self.enviar(solicitud);
-        }
-    }
-
-    fn enviar(&self, solicitud: SolicitudNavegacion) {
-        if let Some(sesion) = &self.sesion {
-            sesion.ordenar(OrdenSesion::Navegar {
-                id_pestana: solicitud.id_pestana,
-                solicitud: solicitud.solicitud,
-                direccion: solicitud.direccion,
-            });
-        }
-    }
-
-    /// Pánico: purga todo, renueva circuitos, olvida bloqueos y sale si está configurado.
-    pub fn activar_panico(&mut self) {
-        self.purgar_sesion();
-        if self.cfg.panico.abortar_proceso {
-            (self.accion_salida)();
-        }
-    }
-
-    fn purgar_sesion(&mut self) {
-        self.estado.purgar_todo();
-        self.cache_imagen.vaciar();
-        if let Some(sesion) = &self.sesion {
-            sesion.ordenar(OrdenSesion::Purgar);
-        }
-    }
-
-    /// Aplica los eventos pendientes de la sesión.
-    pub fn atender_eventos_sesion(&mut self) {
-        let eventos: Vec<EventoSesion> = self
-            .sesion
-            .as_ref()
-            .map(|s| std::iter::from_fn(|| s.siguiente_evento()).collect())
-            .unwrap_or_default();
-        for evento in eventos {
-            self.atender_evento(evento);
-        }
-    }
-
-    /// Aplica un evento de la sesión.
-    pub fn atender_evento(&mut self, evento: EventoSesion) {
-        match evento {
-            EventoSesion::Tor(estado) => self.mensaje_estado = textos::estado_tor(&estado),
-            EventoSesion::Navegacion {
-                id_pestana,
-                solicitud,
-                resultado,
-            } => {
-                self.estado
-                    .aplicar_resultado(id_pestana, solicitud, resultado);
-            }
-            EventoSesion::AislamientoRotado => {
-                self.mensaje_estado = textos::AISLAMIENTO_ROTADO.to_string()
-            }
-            EventoSesion::PanicoAutomatico => self.activar_panico(),
-        }
-    }
-
-    /// Purga por inactividad si ha vencido el plazo.
-    pub fn comprobar_inactividad(&mut self, ahora: Instant) {
-        if self.estado.inactividad_vencida(ahora) {
-            self.purgar_sesion();
-            self.mensaje_estado = textos::PURGA_INACTIVIDAD.to_string();
-        }
-    }
-
     /// Procesa el teclado y la actividad del usuario.
     fn atender_entrada(&mut self, ctx: &egui::Context) {
         let ahora = Instant::now();
@@ -172,6 +42,7 @@ impl VentanaPrincipal {
         self.comprobar_inactividad(ahora);
     }
 
+    /// Resumen del IDS de la sesión (vacío sin sesión).
     fn resumen_ids(&self) -> ResumenTelemetria {
         self.sesion
             .as_ref()
@@ -179,6 +50,7 @@ impl VentanaPrincipal {
             .unwrap_or_default()
     }
 
+    /// Pestañas abiertas, con sus botones de cerrar y de abrir otra.
     fn fila_pestanas(&mut self, ui: &mut Ui) {
         let maximo = self.cfg.interfaz.longitud_titulo_pestana;
         let mut activar = None;
@@ -211,6 +83,7 @@ impl VentanaPrincipal {
         }
     }
 
+    /// Atrás, adelante, motor, barra de direcciones y botones de la derecha.
     fn fila_navegacion(&mut self, ui: &mut Ui, resumen: &ResumenTelemetria) {
         if ui.button(textos::BOTON_ATRAS).clicked() {
             if let Some(s) = self.estado.retroceder() {
@@ -235,6 +108,9 @@ impl VentanaPrincipal {
             if indicador_cabecera(ui, resumen) {
                 self.mostrar_telemetria = !self.mostrar_telemetria;
             }
+            if ui.button(textos::BOTON_REGISTRO).clicked() {
+                self.panel_registro.abierto = !self.panel_registro.abierto;
+            }
             let ir = ui.button(textos::BOTON_IR).clicked();
             let campo = ui.add_sized(
                 [ui.available_width(), ui.spacing().interact_size.y],
@@ -248,6 +124,7 @@ impl VentanaPrincipal {
         });
     }
 
+    /// Desplegable del motor de búsqueda.
     fn selector_motor(&mut self, ui: &mut Ui) {
         let mut seleccionado = self.catalogo.seleccionado();
         egui::ComboBox::from_id_salt("selector_motor")
@@ -260,12 +137,14 @@ impl VentanaPrincipal {
         self.catalogo.seleccionar(seleccionado);
     }
 
+    /// Contenido de la pestaña activa, con letterboxing y reproductor.
     fn panel_central(&mut self, ui: &mut Ui) {
         let disponible = ui.available_rect_before_wrap();
         let caja = calcular_letterboxing(disponible, &self.cfg.interfaz);
         ui.painter()
             .rect_filled(disponible, 0.0, COLOR_FONDO_LETTERBOXING);
         let mut pulsado = None;
+        let mut accion = None;
         ui.scope_builder(egui::UiBuilder::new().max_rect(caja.area_contenido), |ui| {
             ui.painter().rect_filled(
                 caja.area_contenido,
@@ -279,13 +158,32 @@ impl VentanaPrincipal {
                     self.estado.pestana_activa(),
                     &self.catalogo,
                     &mut self.cache_imagen,
-                    self.cfg.worker.frecuencia_corte_audio_hz,
                 );
+                accion = self.controles_reproduccion(ui);
             });
         });
         if let Some(url) = pulsado {
             self.ir_a(&url);
         }
+        match accion {
+            Some(AccionReproductor::Reproducir) => self.reproducir(),
+            Some(AccionReproductor::Parar) => self.reproductor.parar(),
+            None => {}
+        }
+    }
+
+    /// Controles del reproductor si la pestaña activa muestra un medio.
+    fn controles_reproduccion(&mut self, ui: &mut Ui) -> Option<AccionReproductor> {
+        let pestana = self.estado.pestana_activa();
+        if !matches!(
+            pestana.contenido(),
+            EstadoContenido::Pagina(ContenidoPagina::Medio { .. })
+        ) {
+            return None;
+        }
+        let (id, solicitud) = (pestana.id(), pestana.solicitud());
+        ui.add_space(MARGEN_CONTENIDO);
+        self.reproductor.controles(ui, id, solicitud)
     }
 }
 
@@ -295,7 +193,7 @@ impl eframe::App for VentanaPrincipal {
     }
 
     fn on_exit(&mut self) {
-        self.purgar_sesion();
+        self.al_cerrar();
     }
 }
 
@@ -307,31 +205,58 @@ impl VentanaPrincipal {
         let ctx = ui.ctx().clone();
         self.atender_eventos_sesion();
         self.atender_entrada(&ctx);
+        self.vigilar_reproduccion();
+        self.reproductor.avanzar(&ctx, Instant::now());
         let resumen = self.resumen_ids();
+        self.anotar_eventos_ids(&resumen);
+        self.panel_registro.mostrar(&ctx, &mut self.registro);
         egui::Panel::top("panel_superior").show(ui, |ui| {
             ui.horizontal(|ui| self.fila_pestanas(ui));
             ui.separator();
             ui.horizontal(|ui| self.fila_navegacion(ui, &resumen));
         });
-        egui::Panel::bottom("panel_inferior").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(textos::pie_estado()).italics());
-                ui.separator();
-                ui.label(&self.mensaje_estado);
-            });
-        });
+        egui::Panel::bottom("panel_inferior").show(ui, |ui| self.panel_inferior(ui));
         if self.mostrar_telemetria {
             egui::Panel::right("panel_telemetria")
                 .min_size(ANCHO_PANEL_TELEMETRIA)
-                .show(ui, |ui| {
-                    if panel_telemetria(ui, &resumen) {
-                        if let Some(sesion) = &self.sesion {
-                            sesion.ordenar(OrdenSesion::RotarAislamiento);
-                        }
-                    }
-                });
+                .show(ui, |ui| self.panel_derecho(ui, &resumen));
         }
         egui::CentralPanel::default().show(ui, |ui| self.panel_central(ui));
         ctx.request_repaint_after(INTERVALO_REVISION);
+    }
+
+    /// Barra de estado y, si la hay, el aviso de versión nueva.
+    fn panel_inferior(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(textos::pie_estado()).italics());
+            ui.separator();
+            ui.label(&self.mensaje_estado);
+        });
+        let Some(nueva) = &self.version_nueva else {
+            return;
+        };
+        let mut cerrar = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.colored_label(
+                textos::COLOR_AVISO_VERSION,
+                textos::aviso_version(&nueva.version),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut nueva.enlace.as_str()).desired_width(f32::INFINITY),
+            );
+            cerrar = ui.small_button(textos::BOTON_CERRAR_PESTANA).clicked();
+        });
+        if cerrar {
+            self.version_nueva = None;
+        }
+    }
+
+    /// Panel de telemetría; su botón pide circuitos nuevos para todo.
+    fn panel_derecho(&self, ui: &mut Ui, resumen: &ResumenTelemetria) {
+        if panel_telemetria(ui, resumen) {
+            if let Some(sesion) = &self.sesion {
+                sesion.ordenar(OrdenSesion::RotarAislamiento);
+            }
+        }
     }
 }

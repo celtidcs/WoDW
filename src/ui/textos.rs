@@ -41,12 +41,57 @@ pub const TEXTOS_DE_BOTONES: &[&str] = &[
     BOTON_IR,
     BOTON_PANICO,
     BOTON_ROTAR,
+    BOTON_REPRODUCIR,
+    BOTON_PAUSA,
+    BOTON_REANUDAR,
+    BOTON_PARAR,
+    BOTON_REGISTRO,
+    BOTON_GUARDAR_REGISTRO,
+    BOTON_BORRAR_REGISTRO,
+    BOTON_CONFIRMAR,
+    BOTON_CANCELAR,
 ];
+/// Botón para empezar a reproducir un audio o vídeo.
+pub const BOTON_REPRODUCIR: &str = "⏵ Reproducir";
+/// Botón de pausa.
+pub const BOTON_PAUSA: &str = "⏸ Pausa";
+/// Botón para reanudar tras una pausa.
+pub const BOTON_REANUDAR: &str = "⏵ Reanudar";
+/// Botón para detener la reproducción.
+pub const BOTON_PARAR: &str = "⏹ Parar";
+/// Etiqueta del deslizador de volumen.
+pub const ETIQUETA_VOLUMEN: &str = "Volumen";
+
+/// Línea de estado de la reproducción.
+pub fn estado_reproduccion(
+    fase: &crate::maestro::medios::FaseReproduccion,
+    reloj_ms: u64,
+    con_sonido: bool,
+) -> String {
+    use crate::maestro::medios::FaseReproduccion;
+    /// Milisegundos por segundo y segundos por minuto.
+    const MS_POR_S: u64 = 1000;
+    const S_POR_MIN: u64 = 60;
+    let segundos = reloj_ms / MS_POR_S;
+    let tiempo = format!("{}:{:02}", segundos / S_POR_MIN, segundos % S_POR_MIN);
+    let sonido = if con_sonido {
+        ""
+    } else {
+        " (sin dispositivo de sonido)"
+    };
+    match fase {
+        FaseReproduccion::Abriendo => "Abriendo en un proceso aislado sin red…".to_string(),
+        FaseReproduccion::Reproduciendo => format!("{tiempo}{sonido}"),
+        FaseReproduccion::Terminada => format!("Terminado ({tiempo})."),
+        FaseReproduccion::Error(e) => format!("No se pudo reproducir: {e}"),
+    }
+}
 /// Viñeta del botón del pánico: avisa de lo que hace antes de pulsarlo.
 pub fn ayuda_panico(pulsaciones_esc: u8) -> String {
     format!(
-        "Borra al instante todo lo de esta sesión (pestañas, historial y contenido)          y cierra WoDW. No pide confirmación.
-Atajo: pulsar Esc {pulsaciones_esc} veces seguidas."
+        "Borra al instante todo lo de esta sesión (pestañas, historial, contenido y \
+         registro) y cierra WoDW sin dejar nada en el disco. No pide confirmación.\n\
+         Atajo: pulsar Esc {pulsaciones_esc} veces seguidas."
     )
 }
 /// Botón de rotación manual.
@@ -67,12 +112,51 @@ pub const BIENVENIDA: &str = "Navegador de solo lectura sobre Tor: sin JavaScrip
 pub const MOTORES_DISPONIBLES: &str = "Motores de búsqueda configurados:";
 /// Cabecera de enlaces.
 pub const ENLACES: &str = "Enlaces";
+/// Cabecera de los medios incrustados en una página.
+pub const MEDIOS_DE_LA_PAGINA: &str =
+    "Imágenes, audios y vídeos de la página (no se descargan hasta que los pulsas)";
+
+/// Texto de un medio incrustado: su tipo y su texto alternativo o su URL.
+pub fn medio_enlazado(medio: &crate::ipc::mensajes::MedioEnlazado) -> String {
+    use crate::ipc::mensajes::TipoMedioEnlazado;
+    let tipo = match medio.tipo {
+        TipoMedioEnlazado::Imagen => "Imagen",
+        TipoMedioEnlazado::Audio => "Audio",
+        TipoMedioEnlazado::Video => "Vídeo",
+    };
+    let nombre = if medio.texto.is_empty() {
+        &medio.url
+    } else {
+        &medio.texto
+    };
+    format!("[{tipo}] {nombre}")
+}
+
+/// Aviso de texto recortado por el tope de caracteres.
+pub const TEXTO_RECORTADO: &str =
+    "(Texto recortado: la página supera el tope de caracteres configurado.)";
+
+/// Aviso junto a un enlace sospechoso.
+pub fn aviso_enlace(aviso: &crate::seguridad::enlaces::AvisoEnlace) -> String {
+    use crate::seguridad::enlaces::AvisoEnlace;
+    match aviso {
+        AvisoEnlace::DestinoDistinto { host_real } => {
+            format!("⚠ Engañoso: en realidad lleva a {host_real}")
+        }
+        AvisoEnlace::Punycode { host_real } => {
+            format!("⚠ Nombre internacionalizado que puede imitar a otro: {host_real}")
+        }
+    }
+}
 
 /// Texto del estado de Tor.
 pub fn estado_tor(estado: &crate::maestro::sesion::EstadoTor) -> String {
     use crate::maestro::sesion::EstadoTor;
     match estado {
-        EstadoTor::Conectando(fraccion) => format!("Conectando a Tor… {:.0} %", fraccion * 100.0),
+        EstadoTor::Conectando(fraccion) => format!(
+            "Conectando a Tor… {:.0} %",
+            fraccion * crate::unidades::POR_CIENTO as f32
+        ),
         EstadoTor::Listo => "Conectado a Tor.".to_string(),
         EstadoTor::Error(e) => format!("Tor no disponible: {e}"),
     }
@@ -88,25 +172,147 @@ pub fn imagen(ancho: u32, alto: u32) -> String {
     format!("Imagen {ancho} × {alto} px, reconstruida desde píxeles (sin metadatos).")
 }
 
-/// Descripción de un audio.
-pub fn audio(frecuencia: u32, canales: u16, muestras: usize, corte: u32) -> String {
+/// Descripción de un audio o vídeo descargado y aún sin abrir.
+pub fn medio(familia: crate::ipc::mensajes::FamiliaMedio, tipo: &str, bytes: usize) -> String {
+    use crate::ipc::mensajes::FamiliaMedio;
+    let nombre = match familia {
+        FamiliaMedio::Audio => "Audio",
+        FamiliaMedio::Video => "Vídeo",
+    };
     format!(
-        "Audio WAV {frecuencia} Hz, {canales} canal(es), {muestras} muestras por canal; filtro paso bajo a {corte} Hz aplicado. (Sin reproducción.)"
+        "{nombre} «{tipo}», {} KiB. Se abre en un proceso aislado sin red al reproducirlo.",
+        bytes / crate::unidades::BYTES_POR_KIB
     )
 }
 
 /// Color de fondo del área de contenido.
 pub const COLOR_FONDO_CONTENIDO: Color32 = Color32::from_rgb(26, 26, 26);
+/// Color del nivel «Informativo» del IDS (verde).
+pub const COLOR_INFORMATIVO: Color32 = Color32::from_rgb(46, 204, 113);
+/// Color del nivel «Medio» del IDS (amarillo).
+pub const COLOR_MEDIO: Color32 = Color32::from_rgb(241, 196, 15);
+/// Color del nivel «Alto» del IDS (ámbar).
+pub const COLOR_ALTO: Color32 = Color32::from_rgb(230, 126, 34);
+/// Color del nivel «Crítico» del IDS (rojo).
+pub const COLOR_CRITICO: Color32 = Color32::from_rgb(231, 76, 60);
+/// Color de los avisos de enlace engañoso (el ámbar del nivel «Alto»).
+pub const COLOR_AVISO_ENLACE: Color32 = COLOR_ALTO;
+/// Color del aviso de versión nueva (el verde del nivel informativo).
+pub const COLOR_AVISO_VERSION: Color32 = COLOR_INFORMATIVO;
+
+/// Aviso de versión nueva.
+pub fn aviso_version(version: &str) -> String {
+    format!(
+        "Hay una versión nueva de WoDW ({version}). Descárgala tú desde su página (WoDW no descarga nada solo):"
+    )
+}
+
+/// Botón que abre el panel del registro de la sesión.
+pub const BOTON_REGISTRO: &str = "Registro";
+/// Título del panel del registro.
+pub const TITULO_REGISTRO: &str = "Registro de la sesión";
+/// Cabeceras de las dos elecciones.
+pub const REGISTRO_QUE: &str = "Qué se registra";
+/// Cabecera del guardado.
+pub const REGISTRO_COMO: &str = "Cómo se guarda";
+/// Nombres de las opciones.
+pub const OPCION_SEGURIDAD: &str = "Seguridad";
+/// Opción completa.
+pub const OPCION_COMPLETO: &str = "Completo";
+/// Opción manual.
+pub const OPCION_MANUAL: &str = "Manual";
+/// Opción automática.
+pub const OPCION_AUTOMATICO: &str = "Automático";
+/// Botones del panel.
+pub const BOTON_GUARDAR_REGISTRO: &str = "Guardar registro ahora";
+/// Borrar el registro de memoria.
+pub const BOTON_BORRAR_REGISTRO: &str = "Borrar registro";
+/// Confirmar una opción más reveladora.
+pub const BOTON_CONFIRMAR: &str = "Sí, lo entiendo y quiero activarlo";
+/// Cancelar.
+pub const BOTON_CANCELAR: &str = "Cancelar";
+/// Etiqueta de la ruta de guardado.
+pub const ETIQUETA_RUTA_REGISTRO: &str = "Archivo:";
+/// Registro vacío.
+pub const REGISTRO_VACIO: &str = "(Sin sucesos todavía.)";
+
+/// Explicación de cada contenido del registro: utilidad, qué guarda y consecuencias.
+pub fn explicacion_contenido_registro(c: crate::configuracion::ContenidoRegistro) -> &'static str {
+    use crate::configuracion::ContenidoRegistro;
+    match c {
+        ContenidoRegistro::Seguridad => {
+            "Para qué sirve: revisar qué amenazas detectó y frenó WoDW. Qué apunta: el estado de \
+             Tor, los ataques detectados, los sitios bloqueados (solo su nombre), los procesos \
+             aislados que fallaron, los medios hostiles, el pánico y las purgas. NO apunta las \
+             páginas que visitas. Consecuencias: si alguien lee el registro, sabe que usaste WoDW y \
+             qué ataques recibiste, pero no qué visitaste. Es la opción recomendada."
+        }
+        ContenidoRegistro::Completo => {
+            "Para qué sirve: una auditoría detallada de toda la sesión. Qué apunta: todo lo de \
+             Seguridad y, además, las direcciones de cada página y archivo que abres y cada \
+             reproducción (nunca el contenido de las páginas ni lo que escribas). Consecuencias: \
+             quien lea el registro sabrá exactamente qué sitios visitaste y cuándo. Si se guarda en \
+             disco y alguien accede a tu equipo (robo, incautación, un programa espía), queda \
+             expuesto todo lo que hiciste. Actívalo solo si necesitas esa auditoría."
+        }
+    }
+}
+
+/// Explicación de cada modo de guardado: utilidad, qué hace y consecuencias.
+pub fn explicacion_guardado_registro(g: crate::configuracion::GuardadoRegistro) -> &'static str {
+    use crate::configuracion::GuardadoRegistro;
+    match g {
+        GuardadoRegistro::Manual => {
+            "Para qué sirve: decidir tú si el registro sale de la memoria. Qué hace: el registro \
+             solo existe mientras WoDW está abierto; se escribe en el disco únicamente cuando \
+             pulsas «Guardar registro ahora». Consecuencias: si no lo guardas, al cerrar WoDW no \
+             queda rastro. Es la opción recomendada."
+        }
+        GuardadoRegistro::Automatico => {
+            "Para qué sirve: no perder nunca el registro. Qué hace: al cerrar WoDW con normalidad \
+             se escribe solo en el archivo indicado (el botón del pánico nunca guarda nada). \
+             Consecuencias: siempre queda un archivo en el disco con lo registrado, que cualquiera \
+             con acceso a tu equipo puede leer, y borrarlo de forma segura es responsabilidad tuya. \
+             En Tails, sin almacenamiento persistente, el archivo desaparece al apagar; con \
+             almacenamiento persistente, se conserva."
+        }
+    }
+}
+
+/// Aviso de confirmación al activar la opción más reveladora: el riesgo
+/// principal, en una frase, distinto de la explicación general.
+pub fn aviso_confirmacion_registro(contenido_completo: bool) -> &'static str {
+    if contenido_completo {
+        "Atención: con «Completo» el registro apuntará cada dirección que visites. Si ese registro \
+         llega al disco y alguien accede a tu equipo, sabrá exactamente qué sitios visitaste."
+    } else {
+        "Atención: con «Automático» quedará siempre un archivo en el disco al cerrar WoDW con \
+         normalidad, aunque no lo pidas. Borrarlo de forma segura será cosa tuya."
+    }
+}
+
+/// Nota junto a «Borrar registro».
+pub const NOTA_BORRAR_REGISTRO: &str =
+    "«Borrar registro» vacía el de la memoria; los archivos que ya guardaste no se tocan.";
+
+/// Resultado de guardar el registro.
+pub fn registro_guardado(resultado: &std::io::Result<()>, ruta: &str) -> String {
+    match resultado {
+        Ok(()) => format!("Registro guardado en {ruta}."),
+        Err(e) => format!("No se pudo guardar el registro en {ruta}: {e}"),
+    }
+}
+
 /// Color del botón del pánico.
 pub const COLOR_PANICO: Color32 = Color32::from_rgb(192, 57, 43);
 
 /// Color por severidad.
 pub fn color_severidad(nivel: NivelSeveridad) -> Color32 {
     match nivel {
-        NivelSeveridad::Informativo => Color32::from_rgb(46, 204, 113),
-        NivelSeveridad::Medio => Color32::from_rgb(241, 196, 15),
-        NivelSeveridad::Alto => Color32::from_rgb(230, 126, 34),
-        NivelSeveridad::Critico => Color32::from_rgb(231, 76, 60),
+        NivelSeveridad::Informativo => COLOR_INFORMATIVO,
+        NivelSeveridad::Medio => COLOR_MEDIO,
+        NivelSeveridad::Alto => COLOR_ALTO,
+        NivelSeveridad::Critico => COLOR_CRITICO,
     }
 }
 

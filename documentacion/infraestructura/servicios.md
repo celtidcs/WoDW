@@ -6,5 +6,6 @@
 | Puentes Tor (opcional) | Entrar en Tor sin que el proveedor lo detecte | obfs4 / Snowflake mediante transportes enchufables |
 | Servicios onion v3 | Destinos de navegación | HTTP/1.1 (y TLS si `https`) sobre flujos Tor |
 | Motores de búsqueda configurados | Búsquedas | HTTP(S) sobre Tor; plantillas en `[motores]` |
+| API de publicaciones de GitHub (`api.github.com/repos/celtidcs/WoDW/releases/latest`) | Aviso de versión nueva al conectar (desactivable en `[actualizaciones]`) | HTTPS sobre Tor, con un aislamiento propio; solo se lee el número de versión, nunca se descarga nada |
 
 WoDW no abre puertos locales ni expone servicios. No usa MCP ni otros conectores.

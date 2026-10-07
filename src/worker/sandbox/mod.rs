@@ -1,6 +1,8 @@
 //! Subsistema de confinamiento multiplataforma del Worker.
 
 #[cfg(target_os = "windows")]
+pub mod appcontainer;
+#[cfg(target_os = "windows")]
 pub mod windows;
 
 #[cfg(target_os = "linux")]
@@ -10,19 +12,23 @@ use crate::error::Resultado;
 
 /// Aplica el confinamiento sobre el proceso actual. Es irreversible.
 ///
+/// `memoria_maxima_bytes` limita el espacio de direcciones en Linux
+/// (`RLIMIT_AS`); en Windows el límite lo impone el Job Object del Maestro.
+///
 /// # Errors
 /// [`crate::error::ErrorApp::Sandbox`] si alguna restricción no puede
 /// aplicarse, o si la plataforma no tiene confinamiento implementado
 /// (el Worker nunca se ejecuta sin confinar).
-pub fn aplicar_sandbox_proceso_actual() -> Resultado<()> {
+pub fn aplicar_sandbox_proceso_actual(memoria_maxima_bytes: u64) -> Resultado<()> {
     #[cfg(target_os = "windows")]
     {
+        let _ = memoria_maxima_bytes;
         windows::aplicar_politicas_proceso_worker()
     }
 
     #[cfg(target_os = "linux")]
     {
-        linux::aplicar_sandbox_worker_linux()
+        linux::aplicar_sandbox_worker_linux(memoria_maxima_bytes)
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]

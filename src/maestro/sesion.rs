@@ -5,14 +5,18 @@
 //! otro hilo. Al soltar la [`ConexionSesion`], el runtime se detiene y
 //! los sub-Workers en curso se destruyen (`kill_on_drop`).
 
-use crate::configuracion::ConfiguracionWodw;
+use crate::configuracion::{ConfiguracionActualizaciones, ConfiguracionWodw};
 use crate::error::Resultado;
 use crate::ids::eventos::EventoDefensivo;
 use crate::ids::motor::{ControlIds, EmisorIds, MotorIds};
+use crate::ipc::mensajes::FamiliaMedio;
+use crate::maestro::medios::productor::producir;
+use crate::maestro::medios::{FaseReproduccion, ManejadorReproduccion};
 use crate::maestro::navegacion::incidentes::RespuestaAutomatica;
 use crate::maestro::navegacion::{FalloNavegacion, ResultadoNavegacion, ServicioNavegacion};
 use crate::maestro::proceso_worker::ProcesadorSubworker;
 use crate::maestro::red::ClienteTor;
+use crate::maestro::versiones::{interpretar_ultima_version, VersionNueva};
 use crate::seguridad::{GestorCanarios, HoneypotRam, TrampaMemoria};
 use std::path::PathBuf;
 use std::sync::{mpsc as canal_std, Arc};
@@ -46,6 +50,19 @@ pub enum OrdenSesion {
     RotarAislamiento,
     /// Purga de sesión: rota el aislamiento y olvida los hosts bloqueados.
     Purgar,
+    /// Reproducir un medio ya descargado en un sub-Worker sin red dedicado.
+    Reproducir {
+        /// Pestaña que lo muestra.
+        id_pestana: u64,
+        /// Host de origen (para la respuesta automática si el medio es hostil).
+        host: String,
+        /// Familia declarada.
+        familia: FamiliaMedio,
+        /// Bytes del archivo.
+        datos: Vec<u8>,
+        /// Estado compartido con la interfaz.
+        reproduccion: ManejadorReproduccion,
+    },
 }
 
 /// Estado del arranque de Tor.
@@ -77,6 +94,15 @@ pub enum EventoSesion {
     AislamientoRotado,
     /// El IDS ordenó el pánico automático.
     PanicoAutomatico,
+    /// Hay una versión de WoDW más reciente que la instalada.
+    VersionNueva(VersionNueva),
+    /// Un medio resultó hostil: respuesta automática ya aplicada.
+    IncidenteReproduccion {
+        /// Pestaña afectada.
+        id_pestana: u64,
+        /// Fallo tratado.
+        fallo: FalloNavegacion,
+    },
 }
 
 /// Emisor de eventos hacia la interfaz que además solicita repintado.
@@ -188,12 +214,15 @@ fn construir_nucleo(
         Some(emisor.clone()),
     );
     let procesador = ProcesadorSubworker::nuevo(ejecutable, cfg.worker.clone())?;
-    let servicio = Arc::new(ServicioNavegacion::nuevo(
-        cliente.clone(),
-        procesador,
-        respuesta,
-        cfg.red.max_redirecciones,
-    ));
+    let servicio = Arc::new(
+        ServicioNavegacion::nuevo(
+            cliente.clone(),
+            procesador,
+            respuesta,
+            cfg.red.max_redirecciones,
+        )
+        .con_limites(&cfg.worker),
+    );
     let nucleo = Nucleo {
         cliente,
         servicio,
@@ -227,7 +256,11 @@ async fn ejecutar(
     aviso: AvisoInterfaz,
     mut ordenes: mpsc::UnboundedReceiver<OrdenSesion>,
 ) {
-    tokio::spawn(arrancar_tor(nucleo.cliente.clone(), aviso.clone()));
+    tokio::spawn(arrancar_tor(
+        nucleo.cliente.clone(),
+        aviso.clone(),
+        cfg.actualizaciones.clone(),
+    ));
     let intervalo = Duration::from_millis(cfg.ids.intervalo_verificacion_ms);
     let vigilancia = tokio::spawn(vigilar_senuelos(
         nucleo.trampa.clone(),
@@ -235,14 +268,20 @@ async fn ejecutar(
         nucleo.emisor.clone(),
         intervalo,
     ));
+    let cfg = Arc::new(cfg);
     while let Some(orden) = ordenes.recv().await {
-        atender(orden, &nucleo.servicio, &aviso);
+        atender(orden, &nucleo.servicio, &aviso, &cfg);
     }
     vigilancia.abort();
 }
 
 /// Atiende una orden de la interfaz.
-fn atender(orden: OrdenSesion, servicio: &Arc<ServicioReal>, aviso: &AvisoInterfaz) {
+fn atender(
+    orden: OrdenSesion,
+    servicio: &Arc<ServicioReal>,
+    aviso: &AvisoInterfaz,
+    cfg: &Arc<ConfiguracionWodw>,
+) {
     match orden {
         OrdenSesion::Navegar {
             id_pestana,
@@ -269,11 +308,86 @@ fn atender(orden: OrdenSesion, servicio: &Arc<ServicioReal>, aviso: &AvisoInterf
             servicio.fuente().rotar_aislamiento();
             servicio.respuesta_automatica().olvidar_bloqueos();
         }
+        OrdenSesion::Reproducir {
+            id_pestana,
+            host,
+            familia,
+            datos,
+            reproduccion,
+        } => {
+            let peticion = PeticionReproduccion {
+                id_pestana,
+                host,
+                familia,
+                datos,
+                reproduccion,
+            };
+            tokio::spawn(reproducir(
+                servicio.clone(),
+                aviso.clone(),
+                cfg.clone(),
+                peticion,
+            ));
+        }
     }
 }
 
-/// Arranca Tor e informa del progreso.
-async fn arrancar_tor(cliente: Arc<ClienteTor>, aviso: AvisoInterfaz) {
+/// Un medio que la interfaz pide reproducir, con la pestaña y el sitio de los
+/// que procede (para atribuirle un incidente si resulta hostil).
+struct PeticionReproduccion {
+    id_pestana: u64,
+    host: String,
+    familia: FamiliaMedio,
+    datos: Vec<u8>,
+    reproduccion: ManejadorReproduccion,
+}
+
+/// Reproduce un medio en su propio sub-Worker y trata como incidente lo hostil.
+async fn reproducir(
+    servicio: Arc<ServicioReal>,
+    aviso: AvisoInterfaz,
+    cfg: Arc<ConfiguracionWodw>,
+    peticion: PeticionReproduccion,
+) {
+    let PeticionReproduccion {
+        id_pestana,
+        host,
+        familia,
+        datos,
+        reproduccion,
+    } = peticion;
+    let estado = &reproduccion.0;
+    let resultado = match servicio.procesador().canal_medio() {
+        Ok(mut canal) => {
+            producir(
+                &mut canal,
+                familia,
+                datos,
+                estado,
+                &cfg.worker,
+                &cfg.reproduccion,
+            )
+            .await
+        }
+        Err(e) => {
+            estado.fijar_fase(FaseReproduccion::Error(e.to_string()));
+            Err(e)
+        }
+    };
+    if let Err(error) = resultado {
+        let fallo = servicio.responder_a_fallo(&host, error);
+        if fallo.purgar_pestana {
+            aviso.enviar(EventoSesion::IncidenteReproduccion { id_pestana, fallo });
+        }
+    }
+}
+
+/// Arranca Tor e informa del progreso; conectado, consulta si hay versión nueva.
+async fn arrancar_tor(
+    cliente: Arc<ClienteTor>,
+    aviso: AvisoInterfaz,
+    actualizaciones: ConfiguracionActualizaciones,
+) {
     let sondeo = {
         let cliente = cliente.clone();
         let aviso = aviso.clone();
@@ -290,10 +404,42 @@ async fn arrancar_tor(cliente: Arc<ClienteTor>, aviso: AvisoInterfaz) {
     };
     let resultado = cliente.arrancar().await;
     sondeo.abort();
+    let conectado = resultado.is_ok();
     aviso.enviar(EventoSesion::Tor(match resultado {
         Ok(()) => EstadoTor::Listo,
         Err(e) => EstadoTor::Error(e.to_string()),
     }));
+    if conectado && actualizaciones.comprobar_al_iniciar {
+        comprobar_version(&cliente, &aviso, &actualizaciones).await;
+    }
+}
+
+/// Aislamiento propio de la consulta de versiones: no comparte circuito con
+/// ninguna pestaña (los identificadores de pestaña empiezan en 1).
+const AISLAMIENTO_VERSIONES: u64 = u64::MAX;
+
+/// Consulta por Tor la última versión publicada y avisa si es posterior.
+/// Cualquier fallo solo se anota en el registro de depuración: no es un
+/// incidente ni molesta al usuario.
+async fn comprobar_version(
+    cliente: &ClienteTor,
+    aviso: &AvisoInterfaz,
+    cfg: &ConfiguracionActualizaciones,
+) {
+    let resultado = async {
+        let url = url::Url::parse(&cfg.url_api).map_err(|e| e.to_string())?;
+        let respuesta = cliente
+            .obtener(AISLAMIENTO_VERSIONES, &url)
+            .await
+            .map_err(|e| e.to_string())?;
+        interpretar_ultima_version(respuesta.cuerpo(), env!("CARGO_PKG_VERSION"), cfg)
+    }
+    .await;
+    match resultado {
+        Ok(Some(nueva)) => aviso.enviar(EventoSesion::VersionNueva(nueva)),
+        Ok(None) => {}
+        Err(e) => tracing::info!(error = %e, "no se pudo comprobar la versión"),
+    }
 }
 
 /// Verifica periódicamente la trampa de memoria y los canarios.

@@ -1,6 +1,7 @@
 //! Presentación del contenido sanitizado de la pestaña activa.
 
-use crate::maestro::navegacion::ContenidoPagina;
+use crate::ipc::mensajes::MedioEnlazado;
+use crate::maestro::navegacion::{ContenidoPagina, EnlaceRevisado};
 use crate::ui::estado::{EstadoContenido, Pestana};
 use crate::ui::motores::CatalogoMotores;
 use crate::ui::textos;
@@ -30,7 +31,6 @@ pub fn mostrar_pestana(
     pestana: &Pestana,
     catalogo: &CatalogoMotores,
     cache: &mut CacheImagen,
-    corte_audio: u32,
 ) -> Option<String> {
     match pestana.contenido() {
         EstadoContenido::Bienvenida => {
@@ -48,9 +48,7 @@ pub fn mostrar_pestana(
             ui.colored_label(egui::Color32::RED, mensaje);
             None
         }
-        EstadoContenido::Pagina(contenido) => {
-            pagina(ui, pestana.id(), contenido, cache, corte_audio)
-        }
+        EstadoContenido::Pagina(contenido) => pagina(ui, pestana.id(), contenido, cache),
     }
 }
 
@@ -64,51 +62,72 @@ fn bienvenida(ui: &mut Ui, catalogo: &CatalogoMotores) {
     }
 }
 
+/// Medios incrustados en la página; devuelve la dirección del que se pulse.
+fn lista_de_medios(ui: &mut Ui, medios: &[MedioEnlazado]) -> Option<String> {
+    if medios.is_empty() {
+        return None;
+    }
+    ui.add_space(ESPACIO_BLOQUE);
+    ui.label(RichText::new(textos::MEDIOS_DE_LA_PAGINA).strong());
+    let mut pulsado = None;
+    for medio in medios {
+        let etiqueta = textos::medio_enlazado(medio);
+        if ui.link(etiqueta).on_hover_text(&medio.url).clicked() {
+            pulsado = Some(medio.url.clone());
+        }
+    }
+    pulsado
+}
+
+/// Enlaces de la página; devuelve el destino del que se pulse.
+fn lista_de_enlaces(ui: &mut Ui, enlaces: &[EnlaceRevisado]) -> Option<String> {
+    if enlaces.is_empty() {
+        return None;
+    }
+    ui.add_space(ESPACIO_BLOQUE);
+    ui.label(RichText::new(textos::ENLACES).strong());
+    let mut pulsado = None;
+    for enlace in enlaces {
+        pulsado = mostrar_enlace(ui, enlace).or(pulsado);
+    }
+    pulsado
+}
+
+/// Contenido de una pestaña con página; devuelve la dirección pulsada.
 fn pagina(
     ui: &mut Ui,
     id_pestana: u64,
     contenido: &ContenidoPagina,
     cache: &mut CacheImagen,
-    corte_audio: u32,
 ) -> Option<String> {
     match contenido {
         ContenidoPagina::Documento {
             titulo,
             texto,
             enlaces,
+            medios,
+            recortado,
         } => {
             ui.heading(titulo);
             ui.separator();
             ui.label(texto);
-            if enlaces.is_empty() {
-                return None;
+            if *recortado {
+                ui.label(RichText::new(textos::TEXTO_RECORTADO).italics());
             }
-            ui.add_space(ESPACIO_BLOQUE);
-            ui.label(RichText::new(textos::ENLACES).strong());
-            let mut pulsado = None;
-            for enlace in enlaces {
-                if ui.link(&enlace.texto).on_hover_text(&enlace.url).clicked() {
-                    pulsado = Some(enlace.url.clone());
-                }
-            }
-            pulsado
+            let medio = lista_de_medios(ui, medios);
+            lista_de_enlaces(ui, enlaces).or(medio)
         }
         ContenidoPagina::Imagen { ancho, alto, rgba } => {
             ui.label(textos::imagen(*ancho, *alto));
             mostrar_imagen(ui, (id_pestana, rgba.len()), *ancho, *alto, rgba, cache);
             None
         }
-        ContenidoPagina::Audio {
-            frecuencia_muestreo,
-            canales,
-            muestras_por_canal,
+        ContenidoPagina::Medio {
+            familia,
+            tipo_mime,
+            datos,
         } => {
-            ui.label(textos::audio(
-                *frecuencia_muestreo,
-                *canales,
-                *muestras_por_canal,
-                corte_audio,
-            ));
+            ui.label(textos::medio(*familia, tipo_mime, datos.len()));
             None
         }
         ContenidoPagina::NoSoportado { tipo_mime } => {
@@ -116,6 +135,18 @@ fn pagina(
             None
         }
     }
+}
+
+/// Dibuja un enlace con su aviso; devuelve su URL si se pulsa.
+fn mostrar_enlace(ui: &mut Ui, enlace: &EnlaceRevisado) -> Option<String> {
+    ui.horizontal_wrapped(|ui| {
+        let pulsado = ui.link(&enlace.texto).on_hover_text(&enlace.url).clicked();
+        if let Some(aviso) = &enlace.aviso {
+            ui.colored_label(textos::COLOR_AVISO_ENLACE, textos::aviso_enlace(aviso));
+        }
+        pulsado.then(|| enlace.url.clone())
+    })
+    .inner
 }
 
 fn mostrar_imagen(

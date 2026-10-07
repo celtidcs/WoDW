@@ -54,11 +54,26 @@ const ERRNO_CREAR_PROCESO: u32 = libc::ENOSYS as u32;
 /// # Errors
 /// [`ErrorApp::Sandbox`] si alguna restricción no puede aplicarse o si
 /// Landlock no está disponible en el núcleo (falla cerrado).
-pub fn aplicar_sandbox_worker_linux() -> Resultado<()> {
+pub fn aplicar_sandbox_worker_linux(memoria_maxima_bytes: u64) -> Resultado<()> {
+    limitar_memoria(memoria_maxima_bytes)?;
     aplicar_prctl()?;
     aplicar_landlock()?;
     aplicar_seccomp()?;
     impedir_crear_procesos()
+}
+
+/// Limita el espacio de direcciones (`RLIMIT_AS`): una reserva por encima falla
+/// y el Worker termina, sin afectar al resto del sistema.
+fn limitar_memoria(maximo: u64) -> Resultado<()> {
+    let limite = libc::rlimit {
+        rlim_cur: maximo,
+        rlim_max: maximo,
+    };
+    // SAFETY: puntero a una estructura válida durante la llamada.
+    if unsafe { libc::setrlimit(libc::RLIMIT_AS, &limite) } != 0 {
+        return Err(ErrorApp::Sandbox("fallo al aplicar RLIMIT_AS".to_string()));
+    }
+    Ok(())
 }
 
 /// Restricciones básicas con `prctl`.

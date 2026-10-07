@@ -6,6 +6,7 @@
 //! válido. La purga sobrescribe con ceros las cadenas antes de soltarlas.
 
 use crate::maestro::navegacion::{ContenidoPagina, FalloNavegacion, ResultadoNavegacion};
+use crate::seguridad::enlaces::AvisoEnlace;
 use crate::seguridad::purgar_cadenas;
 use std::time::{Duration, Instant};
 
@@ -65,6 +66,11 @@ impl Pestana {
         &self.contenido
     }
 
+    /// Número de la última solicitud de navegación de la pestaña.
+    pub fn solicitud(&self) -> u64 {
+        self.solicitud
+    }
+
     /// Historial hacia atrás (más reciente al final).
     pub fn historial_atras(&self) -> &[String] {
         &self.atras
@@ -97,13 +103,23 @@ impl Pestana {
             titulo,
             texto,
             enlaces,
+            medios,
+            ..
         }) = &mut self.contenido
         {
+            purgar_cadenas(medios.iter_mut().flat_map(|m| [&mut m.url, &mut m.texto]));
             purgar_cadenas(
                 [titulo, texto]
                     .into_iter()
-                    .chain(enlaces.iter_mut().flat_map(|e| [&mut e.texto, &mut e.url])),
+                    .chain(enlaces.iter_mut().flat_map(|e| {
+                        [&mut e.texto, &mut e.url]
+                            .into_iter()
+                            .chain(e.aviso.as_mut().map(AvisoEnlace::host_real_mut))
+                    })),
             );
+        }
+        if let EstadoContenido::Pagina(ContenidoPagina::Medio { datos, .. }) = &mut self.contenido {
+            datos.fill(0);
         }
         self.atras.clear();
         self.adelante.clear();
@@ -264,6 +280,20 @@ impl EstadoNavegador {
         }
     }
 
+    /// Purga la pestaña `id_pestana` tras un incidente ajeno a una navegación
+    /// (por ejemplo, un medio hostil al reproducirlo) y muestra el mensaje.
+    pub fn purgar_pestana_por_incidente(&mut self, id_pestana: u64, fallo: FalloNavegacion) {
+        let Some(solicitud) = self
+            .pestanas
+            .iter()
+            .find(|p| p.id == id_pestana)
+            .map(|p| p.solicitud)
+        else {
+            return;
+        };
+        self.aplicar_resultado(id_pestana, solicitud, Err(fallo));
+    }
+
     /// Aplica el resultado de una navegación; descarta respuestas obsoletas.
     pub fn aplicar_resultado(
         &mut self,
@@ -346,7 +376,7 @@ impl EstadoNavegador {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::mensajes::Enlace;
+    use crate::maestro::EnlaceRevisado;
 
     fn parametros() -> ParametrosEstado {
         ParametrosEstado {
@@ -363,10 +393,15 @@ mod tests {
             contenido: ContenidoPagina::Documento {
                 titulo: titulo.to_string(),
                 texto: "DATO SENSIBLE".to_string(),
-                enlaces: vec![Enlace {
+                enlaces: vec![EnlaceRevisado {
                     texto: "x".into(),
                     url: "http://b.onion/".into(),
+                    aviso: Some(AvisoEnlace::Punycode {
+                        host_real: "xn--b.onion".into(),
+                    }),
                 }],
+                medios: vec![],
+                recortado: false,
             },
         }
     }

@@ -49,6 +49,9 @@ pub fn calcular_dimension_canonica(
 /// Área centrada y márgenes para `disponible`.
 pub fn calcular_letterboxing(disponible: Rect, cfg: &ConfiguracionInterfaz) -> MargenesLetterbox {
     let (ancho, alto) = calcular_dimension_canonica(disponible.width(), disponible.height(), cfg);
+    // El mínimo canónico no puede sacar el contenido del espacio real (con el
+    // panel IDS abierto y la ventana al mínimo quedan menos de 600 puntos).
+    let (ancho, alto) = (ancho.min(disponible.width()), alto.min(disponible.height()));
     let margen_horizontal = ((disponible.width() - ancho) / 2.0).max(0.0);
     let margen_vertical = ((disponible.height() - alto) / 2.0).max(0.0);
     let origen = egui::pos2(
@@ -70,7 +73,7 @@ pub fn crear_opciones_nativas_seguras(
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(titulo)
         .with_inner_size([cfg.ancho_inicial, cfg.alto_inicial])
-        .with_min_inner_size([cfg.ancho_minimo, cfg.alto_minimo]);
+        .with_min_inner_size([cfg.ancho_minimo_ventana, cfg.alto_minimo_ventana]);
     if let Some(icono) = super::icono::icono_aplicacion() {
         viewport = viewport.with_icon(icono);
     }

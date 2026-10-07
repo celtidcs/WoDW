@@ -22,7 +22,7 @@ pub struct ResumenTelemetria {
     /// Total de eventos recibidos.
     pub total_eventos: u64,
     /// Eventos por nivel, indexados por [`NivelSeveridad`] en orden ascendente.
-    pub eventos_por_nivel: [u64; 4],
+    pub eventos_por_nivel: [u64; crate::ids::eventos::NUMERO_NIVELES_SEVERIDAD],
     /// Nivel más alto registrado.
     pub alerta_maxima: NivelSeveridad,
     /// Rotaciones automáticas ejecutadas.

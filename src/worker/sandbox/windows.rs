@@ -11,8 +11,8 @@
 //!    en casi todo el disco y el registro del usuario (integridad media).
 //!
 //! Si cualquiera de los pasos falla, el Worker no procesa nada (falla cerrado).
-//! Limitación declarada: un proceso de integridad baja conserva el acceso a la
-//! red; bloquearlo exige AppContainer (ver `documentacion/defectos-conocidos.md`).
+//! La red la corta el AppContainer en el que el Maestro lo lanza
+//! ([`super::appcontainer`]).
 //!
 //! El Maestro, por su parte, asigna el Worker a un Job Object
 //! ([`JobObjectGuardian`]) que lo destruye si el Maestro termina.
@@ -31,7 +31,7 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
     SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY,
 };
 use windows_sys::Win32::System::SystemServices::{SECURITY_MANDATORY_LOW_RID, SE_GROUP_INTEGRITY};
 use windows_sys::Win32::System::Threading::{
@@ -190,11 +190,12 @@ unsafe impl Send for JobObjectGuardian {}
 unsafe impl Sync for JobObjectGuardian {}
 
 impl JobObjectGuardian {
-    /// Crea el Job Object con `KILL_ON_JOB_CLOSE` y un único proceso activo.
+    /// Crea el Job Object con `KILL_ON_JOB_CLOSE`, un único proceso activo y
+    /// `memoria_maxima_bytes` de memoria comprometida como máximo por proceso.
     ///
     /// # Errors
     /// [`ErrorApp::Sandbox`] si Windows rechaza la creación o la configuración.
-    pub fn nuevo() -> Resultado<Self> {
+    pub fn nuevo(memoria_maxima_bytes: u64) -> Resultado<Self> {
         // SAFETY: atributos y nombre nulos son válidos.
         let manejador = unsafe { CreateJobObjectW(null_mut(), null_mut()) };
         if manejador == 0 || manejador == INVALID_HANDLE_VALUE {
@@ -203,9 +204,11 @@ impl JobObjectGuardian {
         let guardian = Self { manejador };
         // SAFETY: estructura POD cuyo valor cero es válido.
         let mut limites: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-        limites.BasicLimitInformation.LimitFlags =
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+        limites.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+            | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
         limites.BasicLimitInformation.ActiveProcessLimit = 1;
+        limites.ProcessMemoryLimit = usize::try_from(memoria_maxima_bytes).unwrap_or(usize::MAX);
         // SAFETY: puntero y tamaño exactos de la estructura.
         let configurado = unsafe {
             SetInformationJobObject(
@@ -247,6 +250,6 @@ mod tests {
 
     #[test]
     fn job_object_se_crea() {
-        assert!(JobObjectGuardian::nuevo().is_ok());
+        assert!(JobObjectGuardian::nuevo(u64::MAX).is_ok());
     }
 }

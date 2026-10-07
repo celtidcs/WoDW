@@ -19,6 +19,11 @@ use std::time::Duration;
 use tor_rtcompat::PreferredRuntime;
 use url::Url;
 
+/// Puerto por omisión de HTTPS.
+const PUERTO_HTTPS: u16 = 443;
+/// Puerto por omisión de HTTP.
+const PUERTO_HTTP: u16 = 80;
+
 /// Cliente Tor concreto sobre el runtime de Tokio.
 type ClienteArti = TorClient<PreferredRuntime>;
 
@@ -135,7 +140,7 @@ impl ClienteTor {
             operacion: "conexión Tor",
             milisegundos: self.red.tiempo_espera_conexion_ms,
         })?
-        .map_err(|e| ErrorApp::RedArti(format!("no se pudo conectar con {}: {e}", destino.host)))?;
+        .map_err(|e| ErrorApp::RedArti(mensaje_conexion_fallida(&destino.host, &e.to_string())))?;
         if destino.cifrado {
             let mut tls = conectar_tls(flujo, &destino.host, plazo).await?;
             ejecutar_peticion_en_flujo(&mut tls, &peticion, &self.red).await
@@ -144,6 +149,43 @@ impl ClienteTor {
             ejecutar_peticion_en_flujo(&mut flujo, &peticion, &self.red).await
         }
     }
+}
+
+/// Explicaciones en español de los errores de conexión de Arti más comunes:
+/// (fragmento del mensaje original, explicación).
+const ERRORES_ARTI: &[(&str, &str)] = &[
+    (
+        "Invalid onion address",
+        "la dirección .onion no es válida (revisa que esté completa)",
+    ),
+    (
+        "Onion Service not found",
+        "el servicio .onion no está publicado ahora mismo",
+    ),
+    (
+        "descriptor",
+        "no se encontró la descripción del servicio .onion: puede estar apagado",
+    ),
+    ("timed out", "se agotó el tiempo de espera"),
+    ("Connection refused", "el servidor rechazó la conexión"),
+    (
+        "Could not connect",
+        "no se pudo abrir el circuito con el servicio",
+    ),
+    (
+        "not bootstrapped",
+        "Tor todavía no ha terminado de conectar",
+    ),
+];
+
+/// Mensaje de conexión fallida: la explicación en español si se conoce y,
+/// entre paréntesis, el mensaje original de Arti para quien quiera el detalle.
+pub fn mensaje_conexion_fallida(host: &str, original: &str) -> String {
+    let explicacion = ERRORES_ARTI
+        .iter()
+        .find(|(fragmento, _)| original.contains(fragmento))
+        .map_or("error de la red Tor", |(_, explicacion)| explicacion);
+    format!("no se pudo conectar con {host}: {explicacion} (detalle técnico: {original})")
 }
 
 /// Destino de red extraído y validado de una URL.
@@ -186,9 +228,9 @@ impl Destino {
                 motivo: "la configuración solo permite destinos .onion".to_string(),
             });
         }
-        let puerto = url
-            .port_or_known_default()
-            .unwrap_or(if cifrado { 443 } else { 80 });
+        let puerto =
+            url.port_or_known_default()
+                .unwrap_or(if cifrado { PUERTO_HTTPS } else { PUERTO_HTTP });
         let ruta = match url.query() {
             Some(consulta) => format!("{}?{consulta}", url.path()),
             None => url.path().to_string(),
