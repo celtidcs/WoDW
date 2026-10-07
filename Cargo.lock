@@ -8757,11 +8757,12 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "wodw"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arti-client",
  "avif-parse",
  "cpal",
+ "data-encoding",
  "eframe",
  "egui",
  "image",
@@ -8780,6 +8781,7 @@ dependencies = [
  "seccompiler",
  "serde",
  "serde_json",
+ "sha3",
  "symphonia",
  "thiserror 1.0.69",
  "tokio",

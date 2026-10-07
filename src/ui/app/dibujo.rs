@@ -111,6 +111,9 @@ impl VentanaPrincipal {
             if ui.button(textos::BOTON_REGISTRO).clicked() {
                 self.panel_registro.abierto = !self.panel_registro.abierto;
             }
+            if ui.button(textos::BOTON_ACCESOS).clicked() {
+                self.alternar_accesos();
+            }
             let ir = ui.button(textos::BOTON_IR).clicked();
             let campo = ui.add_sized(
                 [ui.available_width(), ui.spacing().interact_size.y],
@@ -127,13 +130,28 @@ impl VentanaPrincipal {
     /// Desplegable del motor de búsqueda.
     fn selector_motor(&mut self, ui: &mut Ui) {
         let mut seleccionado = self.catalogo.seleccionado();
-        egui::ComboBox::from_id_salt("selector_motor")
-            .selected_text(self.catalogo.nombre_seleccionado().to_string())
+        let actual = self.catalogo.motores().get(seleccionado);
+        let aviso = actual.and_then(textos::aviso_motor_sin_verificar);
+        // Un buscador sin verificar se ve en ámbar en el propio selector: el
+        // aviso queda a la vista sin quitar sitio a la barra de direcciones.
+        let mut texto = RichText::new(actual.map(textos::nombre_motor).unwrap_or_default());
+        if aviso.is_some() {
+            texto = texto.color(textos::COLOR_ALTO);
+        }
+        let selector = egui::ComboBox::from_id_salt("selector_motor")
+            .selected_text(texto)
             .show_ui(ui, |ui| {
                 for (indice, motor) in self.catalogo.motores().iter().enumerate() {
-                    ui.selectable_value(&mut seleccionado, indice, &motor.nombre);
+                    ui.selectable_value(&mut seleccionado, indice, textos::nombre_motor(motor))
+                        .on_hover_text(textos::explicacion_fiabilidad(
+                            motor.fiabilidad,
+                            &motor.motivo,
+                        ));
                 }
             });
+        if let Some(aviso) = aviso {
+            selector.response.on_hover_text(aviso);
+        }
         self.catalogo.seleccionar(seleccionado);
     }
 
@@ -210,6 +228,9 @@ impl VentanaPrincipal {
         let resumen = self.resumen_ids();
         self.anotar_eventos_ids(&resumen);
         self.panel_registro.mostrar(&ctx, &mut self.registro);
+        if let Some(url) = self.panel_accesos.mostrar(&ctx, &self.cfg.accesos.lista) {
+            self.ir_a(&url);
+        }
         egui::Panel::top("panel_superior").show(ui, |ui| {
             ui.horizontal(|ui| self.fila_pestanas(ui));
             ui.separator();

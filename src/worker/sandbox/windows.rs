@@ -4,9 +4,10 @@
 //! 1. Políticas de mitigación del proceso: sin código dinámico, sin procesos
 //!    hijo, sin puntos de extensión heredados, comprobación estricta de
 //!    descriptores, solo DLL firmadas por Microsoft y sin imágenes remotas o de
-//!    integridad baja. `DisallowWin32kSystemCalls` no se aplica: Windows lo
-//!    rechaza en tiempo de ejecución si `user32.dll` ya está cargada, y el
-//!    ejecutable único la carga al enlazar la interfaz gráfica.
+//!    integridad baja, y **sin llamadas a Win32k** (`DisallowWin32kSystemCalls`):
+//!    el núcleo gráfico de Windows, una de las superficies de ataque más
+//!    explotadas, queda fuera de su alcance. Es posible porque el Worker es un
+//!    ejecutable aparte (`wodw-worker`) que no carga `user32.dll`.
 //! 2. Nivel de integridad **bajo** en su token: el sistema deniega la escritura
 //!    en casi todo el disco y el registro del usuario (integridad media).
 //!
@@ -37,7 +38,8 @@ use windows_sys::Win32::System::SystemServices::{SECURITY_MANDATORY_LOW_RID, SE_
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, OpenProcessToken, ProcessChildProcessPolicy, ProcessDynamicCodePolicy,
     ProcessExtensionPointDisablePolicy, ProcessImageLoadPolicy, ProcessSignaturePolicy,
-    ProcessStrictHandleCheckPolicy, SetProcessMitigationPolicy, PROCESS_MITIGATION_POLICY,
+    ProcessStrictHandleCheckPolicy, ProcessSystemCallDisablePolicy, SetProcessMitigationPolicy,
+    PROCESS_MITIGATION_POLICY,
 };
 
 /// Bit 0 de las estructuras `PROCESS_MITIGATION_*_POLICY` que lo activan.
@@ -61,6 +63,11 @@ const POLITICAS_MITIGACION: &[(PROCESS_MITIGATION_POLICY, u32, &str)] = &[
         "StrictHandleCheck",
     ),
     (ProcessSignaturePolicy, BIT_0, "MicrosoftSignedOnly"),
+    (
+        ProcessSystemCallDisablePolicy,
+        BIT_0,
+        "DisallowWin32kSystemCalls",
+    ),
     (
         ProcessImageLoadPolicy,
         BITS_0_Y_1,

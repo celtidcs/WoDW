@@ -226,6 +226,33 @@ fn muerto_por_seccomp(_estado: ExitStatus) -> bool {
     false
 }
 
+/// Nombre del ejecutable del Worker, sin la extensión del sistema.
+pub const NOMBRE_EJECUTABLE_WORKER: &str = "wodw-worker";
+
+/// Ruta donde debe estar el Worker: en la misma carpeta que `maestro`.
+pub fn ruta_worker_junto_a(maestro: &Path) -> PathBuf {
+    maestro.with_file_name(format!(
+        "{NOMBRE_EJECUTABLE_WORKER}{}",
+        std::env::consts::EXE_SUFFIX
+    ))
+}
+
+/// Localiza el Worker junto al ejecutable del Maestro. Solo se acepta ese:
+/// nunca se busca en el `PATH` ni se usa el propio Maestro como Worker.
+///
+/// # Errors
+/// [`ErrorApp::Proceso`] si no existe, con su ruta y cómo resolverlo.
+pub fn localizar_worker(maestro: &Path) -> Resultado<PathBuf> {
+    let ruta = ruta_worker_junto_a(maestro);
+    if ruta.is_file() {
+        return Ok(ruta);
+    }
+    Err(ErrorApp::Proceso(format!(
+        "falta {}: es el proceso aislado que abre las páginas y tiene que estar en la misma          carpeta que WoDW. Vuelve a descomprimir la descarga completa.",
+        ruta.display()
+    )))
+}
+
 /// Ejecuta órdenes en sub-Workers efímeros confinados.
 #[derive(Debug, Clone)]
 pub struct ProcesadorSubworker {

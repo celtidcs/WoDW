@@ -22,6 +22,7 @@ use crate::ui::contenido::CacheImagen;
 use crate::ui::estado::EstadoContenido;
 use crate::ui::estado::{EstadoNavegador, ParametrosEstado, SolicitudNavegacion};
 use crate::ui::motores::CatalogoMotores;
+use crate::ui::panel_accesos::PanelAccesos;
 use crate::ui::panel_registro::PanelRegistro;
 use crate::ui::reproductor::Reproductor;
 use crate::ui::textos;
@@ -43,6 +44,7 @@ pub struct VentanaPrincipal {
     version_nueva: Option<VersionNueva>,
     registro: RegistroSesion,
     panel_registro: PanelRegistro,
+    panel_accesos: PanelAccesos,
     /// Eventos del IDS ya pasados al registro.
     eventos_ids_registrados: u64,
     accion_salida: AccionSalida,
@@ -94,6 +96,7 @@ impl VentanaPrincipal {
             version_nueva: None,
             registro,
             panel_registro,
+            panel_accesos: PanelAccesos::default(),
             eventos_ids_registrados: 0,
             accion_salida,
         }
@@ -215,7 +218,7 @@ impl VentanaPrincipal {
             .and_then(|u| u.host_str().map(str::to_string))
             .unwrap_or_default();
         let (id_pestana, solicitud) = (pestana.id(), pestana.solicitud());
-        let anotacion = format!("Reproducción de {}", pestana.url());
+        let anotacion = textos::anotacion_reproduccion(pestana.url());
         self.registro
             .anotar(CategoriaRegistro::Reproduccion, anotacion);
         let manejador = self.reproductor.iniciar(
@@ -256,6 +259,27 @@ impl VentanaPrincipal {
         );
         self.reproductor
             .vigilar(pestana.id(), pestana.solicitud(), muestra_medio);
+    }
+
+    /// Abre o cierra el panel de accesos directos (lo que hace el botón «Accesos»).
+    pub fn alternar_accesos(&mut self) {
+        self.panel_accesos.abierto = !self.panel_accesos.abierto;
+    }
+
+    /// `true` si el panel de accesos directos está abierto.
+    pub fn accesos_abiertos(&self) -> bool {
+        self.panel_accesos.abierto
+    }
+
+    /// Abre el acceso directo `indice` en la pestaña activa (lo que hace pulsar
+    /// uno en el panel). Devuelve `false` si no existe.
+    pub fn abrir_acceso(&mut self, indice: usize) -> bool {
+        let Some(url) = self.cfg.accesos.lista.get(indice).map(|a| a.url.clone()) else {
+            return false;
+        };
+        self.panel_accesos.abierto = false;
+        self.ir_a(&url);
+        true
     }
 
     /// Registro de la sesión (solo lectura).

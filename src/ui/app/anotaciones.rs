@@ -4,6 +4,7 @@ use super::VentanaPrincipal;
 use crate::ids::motor::ResumenTelemetria;
 use crate::maestro::{FalloNavegacion, ResultadoNavegacion};
 use crate::registro::CategoriaRegistro;
+use crate::ui::textos;
 
 impl VentanaPrincipal {
     /// Anota en el registro el resultado de una navegación: un incidente
@@ -15,14 +16,14 @@ impl VentanaPrincipal {
         match resultado {
             Ok(r) => self.registro.anotar(
                 CategoriaRegistro::Navegacion,
-                format!("Abierta {} (HTTP {})", r.url, r.codigo_estado),
+                textos::anotacion_pagina_abierta(&r.url, r.codigo_estado),
             ),
             Err(f) if f.purgar_pestana => self
                 .registro
                 .anotar(CategoriaRegistro::Incidente, f.mensaje.clone()),
             Err(f) => self.registro.anotar(
                 CategoriaRegistro::Navegacion,
-                format!("Fallo: {}", f.mensaje),
+                textos::anotacion_fallo(&f.mensaje),
             ),
         }
     }
@@ -39,7 +40,7 @@ impl VentanaPrincipal {
         for evento in &resumen.historial_reciente[inicio..] {
             self.registro.anotar(
                 CategoriaRegistro::Incidente,
-                format!("IDS {:?}: {:?}", evento.severidad, evento.vector),
+                textos::anotacion_ids(evento.severidad, &evento.vector),
             );
         }
         self.eventos_ids_registrados = resumen.total_eventos;

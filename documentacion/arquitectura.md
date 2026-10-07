@@ -11,16 +11,26 @@ Todo lo que llega de internet se trata como si fuera un ataque: se descarga por 
 proceso aparte, encerrado y de usar y tirar, y a la ventana solo vuelve texto limpio, píxeles y
 números. Si algo sale mal, la aplicación reacciona sola.
 
-## 1. Un ejecutable, dos papeles
+## 1. Dos ejecutables, dos papeles
 
-Hay un único ejecutable (`wodw` en Linux, `wodw.exe` en Windows) que puede trabajar de dos formas:
+WoDW son dos ejecutables que van siempre juntos en la misma carpeta.
 
-- **Maestro**: es el proceso que ves. Lleva la ventana, el cliente de Tor, el detector de
-  incidentes (IDS) y decide qué hacer con cada página.
-- **sub-Worker efímero**: el mismo ejecutable arrancado con `--modo-worker`. El Maestro lanza uno
-  **por cada recurso descargado** (una página, una imagen) y otro por cada audio o vídeo que se
-  reproduce, que vive solo mientras dura la reproducción. El sub-Worker se encierra a sí mismo
-  antes de leer nada, procesa ese único recurso, devuelve el resultado y muere.
+El **Maestro** (`wodw`, `wodw.exe` en Windows) es el proceso que ves. Lleva la ventana, el cliente
+de Tor y el detector de incidentes (IDS), y decide qué hacer con cada página.
+
+El **sub-Worker efímero** (`wodw-worker`, `wodw-worker.exe` en Windows) es el proceso aislado. El
+Maestro lanza uno **por cada recurso descargado** (una página, una imagen) y otro por cada audio o
+vídeo que se reproduce, que vive solo mientras dura la reproducción. El sub-Worker se encierra a sí
+mismo antes de leer nada, procesa ese único recurso, devuelve el resultado y muere. El Maestro solo
+lanza el `wodw-worker` que tiene en su propia carpeta: nunca lo busca en otro sitio, y si falta no
+arranca y lo dice.
+
+Que el Worker sea un ejecutable aparte no es una comodidad: no enlaza nada de la interfaz, así que
+no carga ninguna biblioteca gráfica de Windows (una prueba lo comprueba en su tabla de
+importaciones). Gracias a eso funciona desde cualquier escritorio de Windows, no tiene acceso al
+escritorio del usuario y puede cortarse del núcleo gráfico (`DisallowWin32kSystemCalls`). Hasta la
+0.2.0 era el mismo ejecutable que la interfaz: cargaba `user32.dll` y, fuera del escritorio normal
+del usuario, moría al arrancar.
 
 ¿Por qué así? Los programas que interpretan formatos complejos (HTML, imágenes) son donde suelen
 esconderse los fallos que un atacante aprovecha. Si un archivo malicioso consigue engañar al
@@ -51,7 +61,7 @@ tampoco puede inundar al Maestro.
 
 | Módulo | Qué hace |
 |---|---|
-| `configuracion/` | Lee `wodw.toml`, lo valida al arrancar y define los valores por defecto. |
+| `configuracion/` | Lee `wodw.toml`, lo valida al arrancar y define los valores por defecto, incluidos los buscadores y accesos directos con su fiabilidad. `onion.rs` comprueba las direcciones v3 con su suma de control (SHA3-256, rend-spec-v3), así que una dirección mal copiada se rechaza al arrancar. |
 | `maestro/red/http/` | Un cliente HTTP/1.1 pequeño y desconfiado: construye peticiones validadas (`peticion`), lee con plazos y límites (`lector`), interpreta la cabecera de forma estricta (`respuesta`) y lee el cuerpo con aritmética comprobada (`cuerpo`). |
 | `maestro/red/cliente.rs` | El cliente de Tor (`arti-client`), con **Stream Isolation** por pestaña y rotación de circuitos. |
 | `maestro/red/configuracion_tor.rs` | Rutas de datos de Tor, puentes, transportes enchufables y **Vanguards**. |
@@ -62,6 +72,7 @@ tampoco puede inundar al Maestro.
 | `maestro/versiones.rs` | Aviso de versión nueva: interpreta la respuesta de GitHub como no confiable. |
 | `registro.rs` | Registro de la sesión con contenido y guardado elegibles. |
 | `maestro/sesion.rs` | Un hilo propio con el runtime de Tokio: arranca Tor, alimenta el IDS y vigila los señuelos. |
+| `main.rs` y `bin/wodw-worker.rs` | Los dos ejecutables: la interfaz (Maestro) y el proceso aislado (Worker), que solo llama a `worker::ejecutar_proceso_worker`. |
 | `ipc/` | Los mensajes entre Maestro y Worker y el canal que los transporta. |
 | `worker/` | Lo que hace el Worker: `html` (texto, título, enlaces y medios incrustados), `imagen` y `avif` (a píxeles RGBA), `av1` y `yuv` (decodificación AV1 y reconstrucción de fotogramas), `medios/` (identificación y revisión estructural de contenedores, audio con `symphonia`/`opus-decoder` y su cadena de 48 kHz, vídeo en `fuente_video/` con una pieza para MP4, otra para WebM y otra para H.264), `entidades_html` (entidades HTML) y `sandbox/` (el encierro; `appcontainer/` separa el perfil y sus permisos, la creación del proceso y el citado de la línea de órdenes). |
 | `seguridad/texto.rs`, `seguridad/enlaces.rs` | Higiene Unicode del texto y detección de enlaces engañosos, compartidas por Worker y Maestro. |
@@ -69,7 +80,7 @@ tampoco puede inundar al Maestro.
 | `ids/` | Los eventos de seguridad y el motor que decide la contramedida. |
 | `seguridad/` | Señuelos en disco (canario), página trampa en memoria (Honeypot), firma en memoria y borrado seguro con `zeroize`. |
 | `unidades.rs` | Las constantes de conversión de unidades (milisegundos, minutos, tantos por ciento y por mil, KiB), para que ninguna cifra de conversión quede suelta. |
-| `ui/` | La ventana (`app/`: estado y eventos, anotaciones del registro y dibujado por separado), estado del navegador sin dependencias gráficas (`estado.rs`), paneles, reproductor (`reproductor.rs`, `salida_audio.rs` con `cpal`), panel del registro, fuentes embebidas (`fuentes.rs`), icono, y todos los textos visibles en un único sitio (`textos.rs`). |
+| `ui/` | La ventana (`app/`: estado y eventos, anotaciones del registro y dibujado por separado), estado del navegador sin dependencias gráficas (`estado.rs`), paneles, reproductor (`reproductor.rs`, `salida_audio.rs` con `cpal`), panel del registro, panel de accesos directos (`panel_accesos.rs`), aviso de errores de arranque en una ventana (`error_arranque.rs`, porque en Windows el ejecutable ya no tiene consola), fuentes embebidas (`fuentes.rs`), icono, y todos los textos visibles en un único sitio (`textos.rs`). |
 
 ## 3. Red
 
@@ -125,7 +136,8 @@ ejecutar ni una instrucción fuera de él.
 El Job Object mata al Worker si se cierra el Maestro, le impide tener otros procesos y limita su
 memoria, a 2 GiB de serie. Si algo falla al encerrarlo, el Maestro lo destruye y la navegación
 falla: nunca se procesa nada sin encierro. Ya en marcha, el propio Worker activa las políticas de
-mitigación de Windows (sin código generado en ejecución, sin procesos hijo, sin puntos de extensión,
+mitigación de Windows (sin código generado en ejecución, sin procesos hijo, sin llamadas al
+núcleo gráfico Win32k, sin puntos de extensión,
 comprobación estricta de descriptores, solo DLL firmadas por Microsoft y sin cargar imágenes remotas
 ni de integridad baja) y baja a integridad baja, con lo que Windows le niega escribir en el perfil
 del usuario y en casi todo el disco.
@@ -258,9 +270,6 @@ ejecutable.
 `egui` no compone texto complejo, así que el árabe, el persa y el jemer se ven con las letras
 sueltas, sin unir ni reordenar. Tampoco se admiten los vídeos VP8, VP9 ni Ogg Theora, porque solo
 existen decodificadores escritos en C que no se pueden incluir de forma portable.
-
-La mitigación `DisallowWin32kSystemCalls` no se puede aplicar, porque el ejecutable único carga la
-parte gráfica de Windows (`user32.dll`); haría falta un ejecutable de Worker separado y sin interfaz.
 
 Tails todavía no se ha probado; el encierro de Linux se ha comprobado en un núcleo 6.6. La interfaz
 se dibuja con la GPU (`wgpu`), no por software.

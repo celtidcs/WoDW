@@ -1,8 +1,9 @@
 //! Invariantes de la configuración, comprobadas al cargar (fail fast).
 
+use super::onion::{es_direccion_onion_v3, SUFIJO_ONION};
 use super::secciones::{
-    ConfiguracionInterfaz, ConfiguracionMotores, ConfiguracionPanico, ConfiguracionRedHttp,
-    ConfiguracionWorker,
+    ConfiguracionAccesos, ConfiguracionInterfaz, ConfiguracionMotores, ConfiguracionPanico,
+    ConfiguracionRedHttp, ConfiguracionWorker,
 };
 use super::ConfiguracionWodw;
 use crate::error::{ErrorApp, Resultado};
@@ -10,25 +11,48 @@ use crate::error::{ErrorApp, Resultado};
 /// Marcador que una plantilla de motor debe contener.
 pub(crate) const MARCADOR_CONSULTA: &str = "{consulta}";
 
-/// Longitud de la etiqueta de una dirección onion v3: 35 bytes en base32 = 56 caracteres
-/// (rend-spec-v3, sección «Encoding onion addresses»).
-const LONGITUD_ETIQUETA_ONION_V3: usize = 56;
+/// Cada acceso directo: nombre y motivo no vacíos, dirección `http` o `https`
+/// y, si es onion, v3 con su suma de control correcta.
+fn validar_accesos(accesos: &ConfiguracionAccesos) -> Resultado<()> {
+    for acceso in &accesos.lista {
+        if acceso.nombre.trim().is_empty() {
+            return Err(invalido("accesos.lista.nombre", "no puede estar vacío"));
+        }
+        exigir_motivo("accesos.lista.motivo", &acceso.nombre, &acceso.motivo)?;
+        let url = url::Url::parse(&acceso.url)
+            .map_err(|e| invalido("accesos.lista.url", format!("«{}»: {e}", acceso.nombre)))?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(invalido(
+                "accesos.lista.url",
+                format!(
+                    "«{}»: solo se admiten direcciones http o https",
+                    acceso.nombre
+                ),
+            ));
+        }
+        let host = url.host_str().unwrap_or_default();
+        if host.ends_with(SUFIJO_ONION) && !es_direccion_onion_v3(host) {
+            return Err(invalido(
+                "accesos.lista.url",
+                format!(
+                    "«{}»: {host} no es una dirección onion v3 válida",
+                    acceso.nombre
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
 
-/// Sufijo de los servicios onion.
-const SUFIJO_ONION: &str = ".onion";
-
-/// Comprueba que `host` sea una dirección onion v3 con formato válido:
-/// 56 caracteres del alfabeto base32 en minúsculas (`a-z`, `2-7`) seguidos de `.onion`.
-/// Admite subdominios delante de la etiqueta v3.
-pub fn es_direccion_onion_v3(host: &str) -> bool {
-    let Some(sin_sufijo) = host.strip_suffix(SUFIJO_ONION) else {
-        return false;
-    };
-    let etiqueta = sin_sufijo.rsplit('.').next().unwrap_or_default();
-    etiqueta.len() == LONGITUD_ETIQUETA_ONION_V3
-        && etiqueta
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || (b'2'..=b'7').contains(&b))
+/// El motivo de la fiabilidad se muestra al usuario: no puede faltar.
+fn exigir_motivo(campo: &str, nombre: &str, motivo: &str) -> Resultado<()> {
+    if motivo.trim().is_empty() {
+        return Err(invalido(
+            campo,
+            format!("«{nombre}»: hay que explicar su fiabilidad"),
+        ));
+    }
+    Ok(())
 }
 
 /// Construye un error de configuración para `campo`.
@@ -51,6 +75,7 @@ fn exigir_positivo(campo: &str, valor: u64) -> Resultado<()> {
 pub(crate) fn validar(cfg: &ConfiguracionWodw) -> Resultado<()> {
     validar_red(&cfg.red)?;
     validar_motores(&cfg.motores)?;
+    validar_accesos(&cfg.accesos)?;
     validar_worker(&cfg.worker)?;
     validar_limites_ipc(cfg)?;
     exigir_positivo("registro.max_entradas", cfg.registro.max_entradas as u64)?;
@@ -134,6 +159,7 @@ fn validar_motores(motores: &ConfiguracionMotores) -> Resultado<()> {
         return Err(invalido("motores.lista", "debe haber al menos un motor"));
     }
     for motor in &motores.lista {
+        exigir_motivo("motores.lista.motivo", &motor.nombre, &motor.motivo)?;
         if !motor.plantilla.contains(MARCADOR_CONSULTA) {
             return Err(invalido(
                 "motores.lista.plantilla",

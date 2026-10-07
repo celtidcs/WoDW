@@ -7,12 +7,15 @@ queda por confirmar y cuál sería el siguiente paso. Si encuentras algo que no 
 | ID | Componente | Gravedad | Estado |
 |---|---|---|---|
 | D-1 | Worker en Windows | Alta | **Corregido en 0.2.0** |
-| D-2 | Worker en Windows | Media | Abierto |
+| D-2 | Worker en Windows | Media | **Corregido en 0.2.1** |
 | D-3 | Worker en Linux / Tails | Alta | Corregido en Linux; Tails sin probar |
 | D-4 | Dependencias | Media | Aceptado con excepción |
 | D-5 | Arranque de Tor en Windows | Alta | Resuelto con parche temporal |
 | D-6 | Botón del pánico (Windows) | Crítica | **Corregido en 0.2.0** |
 | D-7 | Texto en árabe, persa y jemer | Baja | Abierto |
+| D-8 | Buscador Torch | Media | **Corregido en 0.2.1** |
+| D-9 | Consola en Windows | Media | **Corregido en 0.2.1** |
+| D-10 | Proceso aislado en Windows | Alta | **Corregido en 0.2.1** |
 
 ## D-1 — El Worker conserva acceso a la red en Windows
 
@@ -29,6 +32,10 @@ queda por confirmar y cuál sería el siguiente paso. Si encuentras algo que no 
    porque implica cambiar los permisos de un archivo del usuario en cada arranque.
 
 ## D-2 — `DisallowWin32kSystemCalls` no se puede aplicar
+
+> **Corregido en la 0.2.1**: el proceso aislado es ahora un ejecutable propio, `wodw-worker`, que no
+> carga nada gráfico y se encierra sin acceso al núcleo gráfico de Windows. Lo que sigue describe el
+> problema original.
 
 1. **Qué pasa**: Windows rechaza esta mitigación (error 19) en el ejecutable real.
 2. **Comprobado**: no es un problema de parámetros; la misma llamada funciona en un binario que no
@@ -98,3 +105,34 @@ se puede leer con esfuerzo, aunque no se ve como en un navegador corriente.
 No es un problema de fuentes: están todas incluidas. La biblioteca con la que se dibuja la interfaz
 (`egui`) todavía no sabe componer este tipo de escritura. Arreglarlo exige añadir un motor de
 composición de texto, un cambio grande que queda pendiente.
+
+## D-8 — La dirección de Torch estaba mal escrita (0.1.0 y 0.2.0)
+
+La dirección de Torch que traían estas versiones tenía el aspecto de una dirección `.onion` correcta,
+pero no superaba la suma de control que llevan dentro todas las direcciones modernas, así que ningún
+servicio podía tenerla y la búsqueda con Torch nunca funcionó. WoDW solo comprobaba la longitud y las
+letras de la dirección.
+
+La versión 0.2.1 comprueba la suma de control de todas las direcciones `.onion` de buscadores y
+accesos directos, y rechaza al arrancar las que no la superan. Torch ya no viene de serie: su
+dirección actual no la confirma ninguna fuente oficial y la red Tor no tiene publicado su servicio.
+
+## D-9 — En Windows se abría una terminal junto a la ventana (0.1.0 y 0.2.0)
+
+Junto a la ventana de WoDW aparecía una terminal con mensajes técnicos, entre ellos el nombre del
+sitio en cada incidente de seguridad. Si se cerraba, WoDW terminaba de golpe, sin guardar el registro
+automático ni borrar el perfil de aislamiento. En la 0.2.1 la terminal ya no aparece, y los errores
+que impiden arrancar se muestran en una ventana de aviso.
+
+## D-10 — El proceso aislado dependía del escritorio de Windows (0.2.0)
+
+En la 0.2.0, el proceso aislado que abre cada página era el mismo ejecutable que la interfaz y
+cargaba las bibliotecas gráficas de Windows. En el escritorio normal del usuario funcionaba, pero
+tenía acceso a ese escritorio, cosa que un proceso aislado no debería tener; y en cualquier otro
+escritorio, como los de algunos entornos remotos o automatizados, moría al arrancar (error
+`0xc0000142`) y WoDW no podía abrir ninguna página.
+
+Desde la 0.2.1, el proceso aislado es un ejecutable propio, `wodw-worker`, sin nada de interfaz:
+funciona en cualquier escritorio, no tiene acceso al del usuario y está cortado del núcleo gráfico
+de Windows. Por eso WoDW son ahora dos ejecutables que tienen que ir juntos en la misma carpeta.
+

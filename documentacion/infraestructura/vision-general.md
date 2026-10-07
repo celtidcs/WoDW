@@ -1,8 +1,9 @@
 # Visión general de la infraestructura: WoDW
 
 ## Componentes
-- **Locales**: un único ejecutable (`wodw` / `wodw.exe`) que contiene la interfaz, el cliente Tor
-  (Arti) y el modo Worker. Opcionalmente, `wodw.toml` junto al ejecutable y, si se usan puentes,
+- **Locales**: dos ejecutables en la misma carpeta: `wodw` (`wodw.exe`), con la interfaz y el
+  cliente Tor (Arti), y `wodw-worker` (`wodw-worker.exe`), el proceso aislado que abre cada recurso,
+  sin nada de interfaz. Opcionalmente, `wodw.toml` junto al ejecutable y, si se usan puentes,
   los binarios de transporte (`lyrebird`, `snowflake-client`).
 - **Datos locales de Arti**: estado y caché de directorio en los directorios predeterminados de
   Arti o en `[tor] ruta_estado` / `ruta_cache`.

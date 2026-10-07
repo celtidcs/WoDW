@@ -18,9 +18,9 @@ pub fn indicador_cabecera(ui: &mut Ui, resumen: &ResumenTelemetria) -> bool {
 
 /// Panel lateral; devuelve `true` si se pidió rotar los circuitos.
 pub fn panel_telemetria(ui: &mut Ui, resumen: &ResumenTelemetria) -> bool {
-    ui.heading("Panel defensivo (respuesta automática)");
+    ui.heading(textos::TITULO_PANEL_DEFENSIVO);
     ui.group(|ui| {
-        ui.label(format!("Eventos: {}", resumen.total_eventos));
+        ui.label(textos::eventos_de_la_sesion(resumen.total_eventos));
         for nivel in [
             NivelSeveridad::Informativo,
             NivelSeveridad::Medio,
@@ -29,16 +29,11 @@ pub fn panel_telemetria(ui: &mut Ui, resumen: &ResumenTelemetria) -> bool {
         ] {
             ui.colored_label(
                 textos::color_severidad(nivel),
-                format!(
-                    "• {}: {}",
-                    textos::etiqueta_severidad(nivel),
-                    resumen.eventos_de(nivel)
-                ),
+                textos::eventos_por_nivel(nivel, resumen.eventos_de(nivel)),
             );
         }
-        ui.label(format!(
-            "Rotaciones automáticas de circuitos: {}",
-            resumen.rotaciones_automaticas
+        ui.label(textos::rotaciones_automaticas(
+            resumen.rotaciones_automaticas,
         ));
     });
     let rotar = ui.button(textos::BOTON_ROTAR).clicked();
@@ -47,7 +42,7 @@ pub fn panel_telemetria(ui: &mut Ui, resumen: &ResumenTelemetria) -> bool {
         .max_height(ALTURA_REGISTRO)
         .show(ui, |ui| {
             if resumen.historial_reciente.is_empty() {
-                ui.weak("Sin incidentes en esta sesión.");
+                ui.weak(textos::SIN_INCIDENTES);
             }
             for evento in resumen.historial_reciente.iter().rev() {
                 ui.group(|ui| {

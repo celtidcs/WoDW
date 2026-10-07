@@ -8,7 +8,7 @@ use wodw::ipc::mensajes::{OrdenWorker, RespuestaWorker};
 use wodw::maestro::ProcesadorSubworker;
 
 fn procesador(cfg: ConfiguracionWorker) -> ProcesadorSubworker {
-    ProcesadorSubworker::nuevo(PathBuf::from(env!("CARGO_BIN_EXE_wodw")), cfg).unwrap()
+    ProcesadorSubworker::nuevo(PathBuf::from(env!("CARGO_BIN_EXE_wodw-worker")), cfg).unwrap()
 }
 
 #[tokio::test]

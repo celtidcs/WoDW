@@ -1,5 +1,6 @@
 //! Cadenas visibles por el usuario y colores, reunidos en un único sitio.
 
+use crate::configuracion::{Fiabilidad, MotorConfigurado};
 use crate::ids::eventos::{NivelSeveridad, VectorAmenaza};
 use egui::Color32;
 
@@ -46,6 +47,8 @@ pub const TEXTOS_DE_BOTONES: &[&str] = &[
     BOTON_REANUDAR,
     BOTON_PARAR,
     BOTON_REGISTRO,
+    BOTON_ACCESOS,
+    MARCA_SIN_VERIFICAR,
     BOTON_GUARDAR_REGISTRO,
     BOTON_BORRAR_REGISTRO,
     BOTON_CONFIRMAR,
@@ -209,6 +212,112 @@ pub fn aviso_version(version: &str) -> String {
 
 /// Botón que abre el panel del registro de la sesión.
 pub const BOTON_REGISTRO: &str = "Registro";
+
+/// Anotación del registro: página abierta.
+pub fn anotacion_pagina_abierta(url: &str, codigo: u16) -> String {
+    format!("Abierta {url} (HTTP {codigo})")
+}
+
+/// Anotación del registro: navegación fallida.
+pub fn anotacion_fallo(mensaje: &str) -> String {
+    format!("Fallo: {mensaje}")
+}
+
+/// Anotación del registro: evento del IDS.
+pub fn anotacion_ids(severidad: NivelSeveridad, vector: &VectorAmenaza) -> String {
+    format!("IDS {severidad:?}: {vector:?}")
+}
+
+/// Anotación del registro: reproducción iniciada.
+pub fn anotacion_reproduccion(url: &str) -> String {
+    format!("Reproducción de {url}")
+}
+
+/// Título del panel defensivo.
+pub const TITULO_PANEL_DEFENSIVO: &str = "Panel defensivo (respuesta automática)";
+/// Historial vacío del panel defensivo.
+pub const SIN_INCIDENTES: &str = "Sin incidentes en esta sesión.";
+
+/// Total de eventos del IDS en la sesión.
+pub fn eventos_de_la_sesion(total: u64) -> String {
+    format!("Eventos: {total}")
+}
+
+/// Eventos de un nivel de severidad.
+pub fn eventos_por_nivel(nivel: NivelSeveridad, cantidad: u64) -> String {
+    format!("• {}: {cantidad}", etiqueta_severidad(nivel))
+}
+
+/// Rotaciones automáticas de circuitos en la sesión.
+pub fn rotaciones_automaticas(cantidad: u64) -> String {
+    format!("Rotaciones automáticas de circuitos: {cantidad}")
+}
+
+/// Título de la ventana de error de arranque.
+pub const TITULO_ERROR_ARRANQUE: &str = "WoDW no ha podido arrancar";
+
+/// Texto del aviso de un error que impide arrancar.
+pub fn error_de_arranque(detalle: &str) -> String {
+    format!(
+        "WoDW no ha podido arrancar:
+
+{detalle}
+
+Si has cambiado wodw.toml, revisa el campo que          se indica: wodw.ejemplo.toml explica cada opción."
+    )
+}
+
+/// Botón que abre el panel de accesos directos.
+pub const BOTON_ACCESOS: &str = "Accesos";
+/// Título del panel de accesos directos.
+pub const TITULO_ACCESOS: &str = "Accesos directos";
+/// Explicación al principio del panel de accesos.
+pub const INTRO_ACCESOS: &str = "Sitios que se abren con un clic en la pestaña activa. Lee la \
+     fiabilidad de cada uno antes de entrar: «sin verificar» significa que ninguna fuente oficial \
+     confirma que la dirección sea la auténtica.";
+/// Marca de los buscadores y accesos sin verificar.
+pub const MARCA_SIN_VERIFICAR: &str = "⚠";
+
+/// Nombre de la fiabilidad tal como se muestra.
+pub fn etiqueta_fiabilidad(fiabilidad: Fiabilidad) -> &'static str {
+    match fiabilidad {
+        Fiabilidad::Verificado => "Verificado",
+        Fiabilidad::SinVerificar => "Sin verificar",
+    }
+}
+
+/// Nombre de un buscador en el desplegable: con la marca si no está verificado.
+pub fn nombre_motor(motor: &MotorConfigurado) -> String {
+    match motor.fiabilidad {
+        Fiabilidad::Verificado => motor.nombre.clone(),
+        Fiabilidad::SinVerificar => format!("{} {MARCA_SIN_VERIFICAR}", motor.nombre),
+    }
+}
+
+/// Fiabilidad y motivo, para la viñeta de un buscador o acceso.
+pub fn explicacion_fiabilidad(fiabilidad: Fiabilidad, motivo: &str) -> String {
+    format!("{}. {motivo}", etiqueta_fiabilidad(fiabilidad))
+}
+
+/// Aviso junto al selector cuando el buscador elegido no está verificado.
+pub fn aviso_motor_sin_verificar(motor: &MotorConfigurado) -> Option<String> {
+    (motor.fiabilidad == Fiabilidad::SinVerificar).then(|| {
+        format!(
+            "{MARCA_SIN_VERIFICAR} «{}» está sin verificar: puede ser una copia falsa o estar caído. {}",
+            motor.nombre, motor.motivo
+        )
+    })
+}
+
+/// Línea de un buscador en la pantalla de bienvenida.
+pub fn linea_motor_bienvenida(motor: &MotorConfigurado) -> String {
+    format!(
+        "• {}: {} ({}).",
+        nombre_motor(motor),
+        motor.descripcion,
+        etiqueta_fiabilidad(motor.fiabilidad).to_lowercase()
+    )
+}
 /// Título del panel del registro.
 pub const TITULO_REGISTRO: &str = "Registro de la sesión";
 /// Cabeceras de las dos elecciones.

@@ -1,5 +1,39 @@
 # Historial de cambios: WoDW (Waves on Dark Web)
 
+## Versión 0.2.1
+
+Esta versión arregla tres fallos de la 0.2.0 y amplía la búsqueda. Trae un cambio en la descarga
+de Windows: ahora es un `.zip` con dos ejecutables, `wodw.exe` y `wodw-worker.exe`, que tienen que ir
+juntos en la misma carpeta.
+
+El más importante afectaba al proceso aislado que abre cada página. Era el mismo ejecutable que la
+interfaz y cargaba las bibliotecas gráficas de Windows, así que tenía acceso a tu escritorio, y en
+otros escritorios (algunos entornos remotos o automatizados) ni siquiera arrancaba. Ahora es un
+ejecutable propio, sin nada de interfaz, que funciona en cualquier escritorio y está cortado del
+núcleo gráfico de Windows, una de las partes del sistema más atacadas.
+
+El primero afectaba a Torch: la dirección que traía WoDW estaba mal escrita y nunca llegó a
+funcionar. Toda dirección `.onion` moderna lleva dentro una suma de control que delata los errores
+de copia, y WoDW no la comprobaba. Ahora sí lo hace, tanto en los buscadores que trae como en los
+que añadas tú, así que una dirección mal escrita se rechaza al arrancar en lugar de fallar en
+silencio.
+
+El segundo, que en Windows se abría una ventana de terminal junto a la de WoDW. Además de sobrar,
+mostraba mensajes técnicos a la vista, y si la cerrabas, WoDW se cerraba de golpe sin su limpieza
+normal. Ya no aparece; si WoDW no puede arrancar, por ejemplo por un error en `wodw.toml`, te lo
+explica en una ventana de aviso.
+
+En cuanto a la búsqueda, cada buscador indica ahora su fiabilidad. «Verificado» significa que una
+fuente oficial del propio sitio confirma su dirección y que se ha abierto por Tor desde WoDW; «sin
+verificar», que no hay tal confirmación. De serie vienen Ahmia, DuckDuckGo Onion, OnionLand y VormWeb,
+verificados, y Tor66, sin verificar y marcado con ⚠. Torch, Haystak y Phobos ya no vienen: la red Tor
+no tiene publicado su servicio, señal de que están apagados o abandonados.
+
+También hay un botón nuevo, «Accesos», con sitios que se abren de un clic: los directorios
+antiphishing dark.fail y tor.taxi, que dicen qué sitios están en línea y cuáles son sus direcciones
+auténticas (ojo: también listan mercados ilegales), y la web del Tor Project. Puedes añadir los tuyos
+en `wodw.toml`.
+
 ## Versión 0.2.0
 
 Esta versión trae una corrección de seguridad importante, así que conviene actualizar cuanto antes.

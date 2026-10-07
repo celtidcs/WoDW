@@ -47,22 +47,71 @@ transportes = []
 # ruta_cache = "datos/arti/cache"
 
 [motores]
+# Buscadores del desplegable. Cada uno lleva su fiabilidad: «verificado» si una fuente oficial
+# del propio sitio confirma la dirección y se ha abierto por Tor desde WoDW; «sin_verificar» si
+# no. El motivo se muestra en la interfaz. Un buscador que añadas sin esos campos se considera
+# «sin_verificar». Toda dirección .onion debe ser v3 y superar su suma de control.
 predeterminado = "Ahmia"
 
 [[motores.lista]]
 nombre = "Ahmia"
-descripcion = "Motor curado con filtrado activo anti-abuso"
+descripcion = "Buscador curado que filtra el contenido de abusos"
 plantilla = "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion/search/?q={consulta}"
-
-[[motores.lista]]
-nombre = "Torch"
-descripcion = "Motor sin moderación ni filtros editoriales"
-plantilla = "http://xmh57jrknzkhv6y3ls3ubitzfqnkrwxhopf5aygthi7d6rfdvgchu6ad.onion/cgi-bin/omega/omega?P={consulta}"
+fiabilidad = "verificado"
+motivo = "Dirección publicada en su web oficial (ahmia.fi) y comprobada abriéndola por Tor desde WoDW el 2026-10-07."
 
 [[motores.lista]]
 nombre = "DuckDuckGo Onion"
-descripcion = "Búsqueda en web superficial a través de la red Onion (versión HTML sin JavaScript)"
+descripcion = "Búsqueda en la web normal a través de Tor (versión HTML sin JavaScript)"
 plantilla = "https://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion/html/?q={consulta}"
+fiabilidad = "verificado"
+motivo = "Dirección recogida por los directorios antiphishing dark.fail y tor.taxi y comprobada abriéndola por Tor desde WoDW el 2026-10-07."
+
+[[motores.lista]]
+nombre = "OnionLand"
+descripcion = "Buscador de servicios onion con un índice amplio"
+plantilla = "http://3bbad7fauom4d6sgppalyqddsqbf5u5p56b5k5uk2zxsy3d6ey2jobad.onion/search?q={consulta}"
+fiabilidad = "verificado"
+motivo = "Dirección publicada en su web oficial (onionlandsearchengine.net) y comprobada abriéndola por Tor desde WoDW el 2026-10-07."
+
+[[motores.lista]]
+nombre = "VormWeb"
+descripcion = "Buscador de servicios onion (interfaz en alemán)"
+plantilla = "http://volkancfgpi4c7ghph6id2t7vcntenuly66qjt6oedwtjmyj4tkk5oqd.onion/search?q={consulta}"
+fiabilidad = "verificado"
+motivo = "Dirección publicada en su web oficial (vormweb.de), firmada por el propio sitio en tor.taxi y comprobada abriéndola por Tor desde WoDW el 2026-10-07."
+
+[[motores.lista]]
+nombre = "Tor66"
+descripcion = "Buscador y directorio de servicios onion"
+plantilla = "http://tor66sewebgixwhcqfnp5inzp5x5uohhdy3kvtnyfxc2e5mxiuh34iid.onion/search?q={consulta}"
+fiabilidad = "sin_verificar"
+motivo = "Solo la citan blogs, no una fuente oficial: respondía por Tor el 2026-10-07, pero no se ha podido confirmar que sea el auténtico."
+
+[accesos]
+# Accesos directos del botón «Accesos»: sitios que se abren con un clic. Mismas reglas de
+# fiabilidad y de direcciones que los buscadores. Solo direcciones http o https.
+
+[[accesos.lista]]
+nombre = "dark.fail"
+descripcion = "Directorio antiphishing: dice qué sitios están en línea y publica sus direcciones verificadas con PGP. Ojo: también lista mercados ilegales."
+url = "http://darkfailenbsdla5mal2mxn2uz66od5vtzd5qozslagrfzachha3f3id.onion/"
+fiabilidad = "verificado"
+motivo = "Dirección publicada en su web oficial (dark.fail) y comprobada abriéndola por Tor desde WoDW el 2026-10-07."
+
+[[accesos.lista]]
+nombre = "tor.taxi"
+descripcion = "Directorio antiphishing con las direcciones firmadas por cada sitio. Ojo: también lista mercados ilegales."
+url = "http://tortaxi2dev6xjwbaydqzla77rrnth7yn2oqzjfmiuwn5h6vsk2a4syd.onion/"
+fiabilidad = "verificado"
+motivo = "Dirección publicada en su web oficial (tor.taxi) y comprobada abriéndola por Tor desde WoDW el 2026-10-07."
+
+[[accesos.lista]]
+nombre = "Tor Project"
+descripcion = "Web oficial del Proyecto Tor."
+url = "http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion/"
+fiabilidad = "verificado"
+motivo = "Dirección recogida por dark.fail y tor.taxi y comprobada abriéndola por Tor desde WoDW el 2026-10-07."
 
 [worker]
 # Tamaño máximo de un mensaje del Worker al Maestro (48 MiB: cabe un fotograma 4K).

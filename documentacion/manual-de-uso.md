@@ -9,8 +9,10 @@ llega reconstruido desde cero. Todo el tráfico sale por Tor, que viene dentro d
 
 ## 2. Arrancar
 
-En Windows basta con hacer doble clic en `wodw.exe`; no hace falta instalarlo. En Linux o en Tails,
-ejecuta `./wodw` desde la carpeta donde lo hayas descomprimido.
+WoDW son dos archivos que van juntos: `wodw`, la aplicación, y `wodw-worker`, el proceso aislado
+que abre cada página. Descomprime la descarga completa y no los separes. En Windows basta con hacer
+doble clic en `wodw.exe`; no hace falta instalarlo. En Linux o en Tails, ejecuta `./wodw` desde la
+carpeta donde lo hayas descomprimido.
 
 Al abrirse, la barra de abajo dice «Conectando a Tor… N %». Cuando pone **«Conectado a Tor.»**, ya
 puedes navegar. Si escribes una dirección antes de que termine, la aplicación espera a que Tor esté
@@ -19,8 +21,19 @@ listo y la abre entonces.
 ## 3. Navegar y buscar
 
 Escribe en la barra una dirección `.onion`, una URL que empiece por `http://` o `https://`, o
-simplemente unas palabras, y pulsa **Intro** o **Ir / Buscar**. Las palabras se buscan con el motor
-que tengas elegido en el desplegable de la izquierda: Ahmia, Torch o DuckDuckGo Onion.
+simplemente unas palabras, y pulsa **Intro** o **Ir / Buscar**. Las palabras se buscan con el
+buscador que tengas elegido en el desplegable de la izquierda: Ahmia, DuckDuckGo Onion, OnionLand,
+VormWeb o Tor66.
+
+No todos son igual de fiables. Ahmia, DuckDuckGo Onion, OnionLand y VormWeb están verificados: una
+fuente oficial de cada uno confirma su dirección. Tor66 no lo está, porque solo citan su dirección
+algunos blogs; por eso lleva la marca ⚠, y si lo eliges su nombre se ve en ámbar. Al pasar el ratón
+por cualquiera de ellos se explica el motivo.
+
+El botón **Accesos** abre una lista de sitios útiles que se abren con un clic en la pestaña activa,
+también con su fiabilidad y el motivo. Trae dos directorios antiphishing, dark.fail y tor.taxi, que
+te dicen qué sitios están en línea y cuáles son sus direcciones auténticas, y la web del Tor
+Project. Ten en cuenta que esos directorios también listan mercados ilegales.
 
 Los enlaces de la página aparecen al final, en la sección **Enlaces**, y se abren al pulsarlos. Los
 botones **⏴** y **⏵** van atrás y adelante, **+** abre una pestaña nueva y **×** cierra la que
@@ -106,9 +119,13 @@ no quieres que se borre nada por inactividad, pon `minutos_inactividad_purga = 0
 las que arranca el registro están en `[registro]`, aunque también se cambian desde su panel, y el
 volumen inicial y los búferes de reproducción, en `[reproduccion]`. Para añadir un buscador, crea un
 bloque `[[motores.lista]]` con un `nombre`, una `descripcion` y una `plantilla`, que es la dirección
-de búsqueda con `{consulta}` en el lugar donde van las palabras.
+de búsqueda con `{consulta}` en el lugar donde van las palabras. Los accesos directos se añaden igual,
+en bloques `[[accesos.lista]]` con `nombre`, `descripcion` y `url`. Puedes indicar la `fiabilidad`
+(`verificado` o `sin_verificar`) y el `motivo`; si no lo haces, se muestran como «sin verificar».
+WoDW comprueba que cada dirección `.onion` esté bien escrita, incluida su suma de control interna.
 
-Si el archivo tiene un error, la aplicación no arranca y te dice qué campo falla.
+Si el archivo tiene un error, la aplicación no arranca y te dice qué campo falla: en Windows, en una
+ventana de aviso; en Linux, en la terminal desde la que la lanzaste.
 
 ## 11. ¿Hace falta una VPN?
 

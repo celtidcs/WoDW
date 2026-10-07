@@ -46,9 +46,8 @@ cero (letras limpias, píxeles nuevos, sonido nuevo).
 </p>
 
 La ventana recién abierta y ya **conectada a Tor** (abajo a la izquierda). Arriba están las
-pestañas y la barra de navegación: atrás y adelante, el **selector de buscador** (Ahmia, Torch o
-DuckDuckGo Onion), la barra donde escribir una dirección `.onion` o unas palabras, el indicador
-verde del **IDS**, que abre el panel defensivo, y el botón rojo del **pánico**, que borra todo y
+pestañas y la barra de navegación: atrás y adelante, el **selector de buscador**, la barra donde
+escribir una dirección `.onion` o unas palabras, el indicador verde del **IDS**, que abre el panel defensivo, y el botón rojo del **pánico**, que borra todo y
 cierra la aplicación. Si dejas el ratón quieto sobre él, una viñeta te avisa de lo que hace.
 
 ## Qué hace
@@ -56,8 +55,11 @@ cierra la aplicación. Si dejas el ratón quieto sobre él, una viñeta te avisa
 WoDW navega por Tor sin que tengas que instalar Tor: lo lleva dentro, gracias a `arti-client`, la
 implementación en Rust del propio Proyecto Tor. No abre puertos en tu equipo y nunca pregunta al
 DNS del sistema. Cada pestaña sale por sus propios circuitos, así que un sitio no puede relacionar
-lo que haces en dos pestañas distintas. Para buscar trae Ahmia, Torch y DuckDuckGo Onion, y puedes
-añadir otros buscadores.
+lo que haces en dos pestañas distintas. Para buscar trae cinco buscadores, cada uno con su
+fiabilidad a la vista: Ahmia, DuckDuckGo Onion, OnionLand y VormWeb, cuyas direcciones confirma una
+fuente oficial, y Tor66, que no está verificado y lo indica. El botón «Accesos» lleva con un clic a
+directorios que dicen qué sitios son auténticos, como dark.fail y tor.taxi. Puedes añadir los tuyos,
+y WoDW rechaza cualquier dirección `.onion` mal escrita.
 
 Muestra texto, imágenes, audio y vídeo, pero siempre reconstruidos. Al texto se le quitan los
 caracteres invisibles y los trucos que invierten la dirección de la escritura, se normaliza, y si
@@ -80,7 +82,7 @@ Si lo necesitas, puedes activar un registro de la sesión: tú eliges si apunta 
 con la seguridad o todo, y si se guarda solo o cuando lo pides, y cada opción te explica sus
 consecuencias. Al abrirse, WoDW consulta GitHub a través de Tor y te avisa si hay una versión nueva,
 sin descargar nunca nada. Con puentes obfs4 o Snowflake puedes ocultar a tu proveedor de internet
-que usas Tor. Y es portable: un único ejecutable que no necesita instalación.
+que usas Tor. Y es portable: no necesita instalación.
 
 ## Cómo lo hace
 
@@ -130,8 +132,10 @@ puede protegerte de eso. El resto de limitaciones técnicas conocidas están en
 
 En [Releases](https://github.com/celtidcs/WoDW/releases) hay dos descargas:
 
-- **Windows** (10 u 11, 64 bits): `wodw-0.2.0-windows-x86_64.exe`. Ábrelo y listo; no se instala.
-- **Linux** (64 bits): `wodw-0.2.0-linux-x86_64.tar.gz`. Descomprímelo y ejecuta `./wodw`. Necesita
+- **Windows** (10 u 11, 64 bits): `wodw-0.2.1-windows-x86_64.zip`. Descomprímelo y abre `wodw.exe`;
+  no se instala. Dentro van dos ejecutables, `wodw.exe` y `wodw-worker.exe` (el proceso aislado que
+  abre cada página): tienen que estar juntos en la misma carpeta.
+- **Linux** (64 bits): `wodw-0.2.1-linux-x86_64.tar.gz`. Descomprímelo y ejecuta `./wodw`. Necesita
   glibc 2.39 o posterior, OpenSSL 3 y la biblioteca de sonido ALSA (`libasound2`), es decir,
   Debian 13, Ubuntu 24.04, Tails 7 o más recientes. En distribuciones más antiguas, compílalo tú
   (abajo se explica cómo).
@@ -155,7 +159,8 @@ cd WoDW
 cargo build --release
 ```
 
-El ejecutable queda en `target/release/wodw` (o `wodw.exe`). Para comprobar que todo está bien:
+Los dos ejecutables quedan en `target/release/`: `wodw` y `wodw-worker` (con `.exe` en Windows),
+que tienen que ir juntos. Para comprobar que todo está bien:
 
 ```bash
 cargo test --all-features
@@ -178,8 +183,9 @@ scripts que preparan el entorno en Windows y en Linux.
 
 ## Estado del proyecto
 
-Versión **0.2.0**. Es la primera que reproduce audio y vídeo, y corrige un fallo de seguridad
-importante de la 0.1.0: en Windows, el botón del pánico dejaba en el disco una copia de la memoria
+Versión **0.2.1**. Comprueba que las direcciones `.onion` estén bien escritas, indica la fiabilidad de
+cada buscador, añade accesos directos y, en Windows, ya no abre una terminal. La 0.2.0 fue la primera
+que reproduce audio y vídeo, y corrigió un fallo de seguridad importante de la 0.1.0: en Windows, el botón del pánico dejaba en el disco una copia de la memoria
 de la sesión (en los [defectos conocidos](documentacion/defectos-conocidos.md) se explica cómo
 borrarla). Probada en Windows 11 y en Linux (Debian 13), también navegando de verdad por servicios
 onion. En Tails todavía no se ha probado.

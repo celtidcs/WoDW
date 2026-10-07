@@ -58,7 +58,11 @@ fn bienvenida(ui: &mut Ui, catalogo: &CatalogoMotores) {
     ui.add_space(ESPACIO_BLOQUE);
     ui.label(RichText::new(textos::MOTORES_DISPONIBLES).strong());
     for motor in catalogo.motores() {
-        ui.label(format!("• {}: {}", motor.nombre, motor.descripcion));
+        ui.label(textos::linea_motor_bienvenida(motor))
+            .on_hover_text(textos::explicacion_fiabilidad(
+                motor.fiabilidad,
+                &motor.motivo,
+            ));
     }
 }
 

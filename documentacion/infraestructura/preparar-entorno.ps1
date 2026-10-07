@@ -52,4 +52,4 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Las pruebas fallaron." }
 Write-Host "Configuración opcional: copie wodw.ejemplo.toml como wodw.toml junto al ejecutable." -ForegroundColor White
 
 Write-Host "=== Entorno WoDW preparado exitosamente en Windows ===" -ForegroundColor Cyan
-Write-Host "Para arrancar la aplicación, ejecute: cargo run --release" -ForegroundColor White
+Write-Host "Para arrancar la aplicación: cargo build --release (compila wodw.exe y wodw-worker.exe) y después target\release\wodw.exe" -ForegroundColor White

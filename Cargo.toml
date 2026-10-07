@@ -1,13 +1,25 @@
 [package]
 name = "wodw"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["celtidcs"]
+default-run = "wodw"
 description = "Navegador de escritorio de solo lectura para la red Tor, con Tor incluido y cada página procesada en un proceso aislado y desechable."
 # GPL-3.0 o posterior, la misma licencia que el resto de proyectos públicos del autor.
 license = "GPL-3.0-or-later"
 repository = "https://github.com/celtidcs/WoDW"
 readme = "README.md"
+
+# Dos ejecutables: la interfaz y el proceso aislado. El Worker va aparte para
+# no enlazar nada gráfico (sin `user32.dll` no depende del escritorio y admite
+# DisallowWin32kSystemCalls).
+[[bin]]
+name = "wodw"
+path = "src/main.rs"
+
+[[bin]]
+name = "wodw-worker"
+path = "src/bin/wodw-worker.rs"
 
 [dependencies]
 tokio = { version = "1.38", features = ["full"] }
@@ -29,6 +41,9 @@ egui = "0.36"
 eframe = "0.36"
 toml = "0.8"
 url = "2.5"
+# Suma de control de las direcciones onion v3 (rend-spec-v3); ya las usa Arti.
+sha3 = "0.10"
+data-encoding = "2"
 native-tls = "0.2"
 tokio-native-tls = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico", "qoi"] }
@@ -63,6 +78,8 @@ windows-sys = { version = "0.52", features = [
     "Win32_Storage_FileSystem",
     "Win32_UI_Shell",
     "Win32_System_Diagnostics_Debug",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_StationsAndDesktops",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

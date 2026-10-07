@@ -6,17 +6,18 @@
 //! inválido, el arranque falla (fail fast) en vez de continuar con un valor
 //! sorprendente.
 
+mod onion;
 pub mod secciones;
 mod validacion;
 
+pub use onion::es_direccion_onion_v3;
 pub use secciones::{
-    ConfiguracionActualizaciones, ConfiguracionAutomatizacion, ConfiguracionCanarios,
-    ConfiguracionIds, ConfiguracionInterfaz, ConfiguracionMotores, ConfiguracionPanico,
-    ConfiguracionRedHttp, ConfiguracionRegistro, ConfiguracionReproduccion, ConfiguracionTor,
-    ConfiguracionWorker, ContenidoRegistro, GuardadoRegistro, ModoVanguardias, MotorConfigurado,
-    TransporteEnchufable,
+    AccesoDirecto, ConfiguracionAccesos, ConfiguracionActualizaciones, ConfiguracionAutomatizacion,
+    ConfiguracionCanarios, ConfiguracionIds, ConfiguracionInterfaz, ConfiguracionMotores,
+    ConfiguracionPanico, ConfiguracionRedHttp, ConfiguracionRegistro, ConfiguracionReproduccion,
+    ConfiguracionTor, ConfiguracionWorker, ContenidoRegistro, Fiabilidad, GuardadoRegistro,
+    ModoVanguardias, MotorConfigurado, TransporteEnchufable, MOTIVO_SIN_COMPROBAR,
 };
-pub use validacion::es_direccion_onion_v3;
 
 use crate::error::{ErrorApp, Resultado};
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,8 @@ pub struct ConfiguracionWodw {
     pub tor: ConfiguracionTor,
     /// Motores de búsqueda.
     pub motores: ConfiguracionMotores,
+    /// Accesos directos.
+    pub accesos: ConfiguracionAccesos,
     /// Procesamiento confinado en el Worker.
     pub worker: ConfiguracionWorker,
     /// Reproducción de audio y vídeo.

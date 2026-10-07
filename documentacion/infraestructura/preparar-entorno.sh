@@ -54,4 +54,4 @@ cargo test
 
 echo "=== Entorno WoDW preparado exitosamente en Linux ==="
 echo "Configuración opcional: copie wodw.ejemplo.toml como wodw.toml junto al ejecutable."
-echo "Para arrancar la aplicación: cargo run --release"
+echo "Para arrancar la aplicación: cargo build --release (compila wodw y wodw-worker) y después ./target/release/wodw"

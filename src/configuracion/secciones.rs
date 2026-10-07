@@ -107,6 +107,28 @@ pub struct ConfiguracionTor {
     pub ruta_cache: Option<PathBuf>,
 }
 
+/// Hasta dónde se ha comprobado que una dirección es la auténtica del sitio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Fiabilidad {
+    /// Dirección confirmada por una fuente oficial del propio sitio (o por un
+    /// directorio que guarda la firma del sitio) y abierta por Tor desde WoDW.
+    Verificado,
+    /// Dirección sin fuente oficial que la confirme: puede ser una copia
+    /// falsa, estar caída o haber cambiado.
+    #[default]
+    SinVerificar,
+}
+
+/// Motivo que se muestra para una entrada añadida a mano sin motivo propio.
+pub const MOTIVO_SIN_COMPROBAR: &str =
+    "Añadido en wodw.toml; WoDW no ha comprobado que la dirección sea la auténtica.";
+
+/// Motivo por defecto de las entradas que no declaran uno.
+fn motivo_sin_comprobar() -> String {
+    MOTIVO_SIN_COMPROBAR.to_string()
+}
+
 /// Motor de búsqueda declarado en configuración.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -117,6 +139,12 @@ pub struct MotorConfigurado {
     pub descripcion: String,
     /// URL con el marcador `{consulta}` donde se inserta la búsqueda codificada.
     pub plantilla: String,
+    /// Fiabilidad de la dirección; sin declarar, «sin verificar».
+    #[serde(default)]
+    pub fiabilidad: Fiabilidad,
+    /// Por qué tiene esa fiabilidad (se muestra en la interfaz).
+    #[serde(default = "motivo_sin_comprobar")]
+    pub motivo: String,
 }
 
 /// Catálogo de motores de búsqueda.
@@ -130,32 +158,125 @@ pub struct ConfiguracionMotores {
 }
 
 impl Default for ConfiguracionMotores {
-    /// Solo incluye motores cuya dirección v3 tiene formato válido. Excavator y
-    /// Phobos se retiraron porque sus direcciones no son comprobables; pueden
-    /// añadirse en `wodw.toml`.
+    /// Los verificados primero y, después, los que no se han podido verificar.
+    /// Fuera: Torch, Haystak y Phobos (sin servicio publicado en Tor: apagados o
+    /// abandonados; la dirección de Torch de la 0.2.0 además era inválida),
+    /// Excavator (sin dirección fiable) y la Hidden Wiki (muchas copias falsas).
     fn default() -> Self {
-        let motor = |nombre: &str, descripcion: &str, plantilla: &str| MotorConfigurado {
+        let motor = |nombre: &str,
+                     descripcion: &str,
+                     plantilla: &str,
+                     fiabilidad: Fiabilidad,
+                     motivo: &str| MotorConfigurado {
             nombre: nombre.to_string(),
             descripcion: descripcion.to_string(),
             plantilla: plantilla.to_string(),
+            fiabilidad,
+            motivo: motivo.to_string(),
         };
         Self {
             predeterminado: "Ahmia".to_string(),
             lista: vec![
                 motor(
                     "Ahmia",
-                    "Motor curado con filtrado activo anti-abuso",
+                    "Buscador curado que filtra el contenido de abusos",
                     "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion/search/?q={consulta}",
-                ),
-                motor(
-                    "Torch",
-                    "Motor sin moderación ni filtros editoriales",
-                    "http://xmh57jrknzkhv6y3ls3ubitzfqnkrwxhopf5aygthi7d6rfdvgchu6ad.onion/cgi-bin/omega/omega?P={consulta}",
+                    Fiabilidad::Verificado,
+                    "Dirección publicada en su web oficial (ahmia.fi) y comprobada abriéndola por Tor desde WoDW el 2026-10-07.",
                 ),
                 motor(
                     "DuckDuckGo Onion",
-                    "Búsqueda en web superficial a través de la red Onion (versión HTML sin JavaScript)",
+                    "Búsqueda en la web normal a través de Tor (versión HTML sin JavaScript)",
                     "https://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion/html/?q={consulta}",
+                    Fiabilidad::Verificado,
+                    "Dirección recogida por los directorios antiphishing dark.fail y tor.taxi y comprobada abriéndola por Tor desde WoDW el 2026-10-07.",
+                ),
+                motor(
+                    "OnionLand",
+                    "Buscador de servicios onion con un índice amplio",
+                    "http://3bbad7fauom4d6sgppalyqddsqbf5u5p56b5k5uk2zxsy3d6ey2jobad.onion/search?q={consulta}",
+                    Fiabilidad::Verificado,
+                    "Dirección publicada en su web oficial (onionlandsearchengine.net) y comprobada abriéndola por Tor desde WoDW el 2026-10-07.",
+                ),
+                motor(
+                    "VormWeb",
+                    "Buscador de servicios onion (interfaz en alemán)",
+                    "http://volkancfgpi4c7ghph6id2t7vcntenuly66qjt6oedwtjmyj4tkk5oqd.onion/search?q={consulta}",
+                    Fiabilidad::Verificado,
+                    "Dirección publicada en su web oficial (vormweb.de), firmada por el propio sitio en tor.taxi y comprobada abriéndola por Tor desde WoDW el 2026-10-07.",
+                ),
+                motor(
+                    "Tor66",
+                    "Buscador y directorio de servicios onion",
+                    "http://tor66sewebgixwhcqfnp5inzp5x5uohhdy3kvtnyfxc2e5mxiuh34iid.onion/search?q={consulta}",
+                    Fiabilidad::SinVerificar,
+                    "Solo la citan blogs, no una fuente oficial: respondía por Tor el 2026-10-07, pero no se ha podido confirmar que sea el auténtico.",
+                ),
+            ],
+        }
+    }
+}
+
+/// Acceso directo a un sitio (por ejemplo, un directorio de direcciones).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccesoDirecto {
+    /// Nombre visible.
+    pub nombre: String,
+    /// Qué es el sitio y qué conviene saber antes de abrirlo.
+    pub descripcion: String,
+    /// Dirección `http` o `https` que se abre al pulsarlo.
+    pub url: String,
+    /// Fiabilidad de la dirección; sin declarar, «sin verificar».
+    #[serde(default)]
+    pub fiabilidad: Fiabilidad,
+    /// Por qué tiene esa fiabilidad (se muestra en la interfaz).
+    #[serde(default = "motivo_sin_comprobar")]
+    pub motivo: String,
+}
+
+/// Accesos directos del panel «Accesos».
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ConfiguracionAccesos {
+    /// Accesos disponibles, en el orden en que se muestran.
+    pub lista: Vec<AccesoDirecto>,
+}
+
+impl Default for ConfiguracionAccesos {
+    fn default() -> Self {
+        let acceso =
+            |nombre: &str, descripcion: &str, url: &str, fiabilidad: Fiabilidad, motivo: &str| {
+                AccesoDirecto {
+                    nombre: nombre.to_string(),
+                    descripcion: descripcion.to_string(),
+                    url: url.to_string(),
+                    fiabilidad,
+                    motivo: motivo.to_string(),
+                }
+            };
+        Self {
+            lista: vec![
+                acceso(
+                    "dark.fail",
+                    "Directorio antiphishing: dice qué sitios están en línea y publica sus direcciones verificadas con PGP. Ojo: también lista mercados ilegales.",
+                    "http://darkfailenbsdla5mal2mxn2uz66od5vtzd5qozslagrfzachha3f3id.onion/",
+                    Fiabilidad::Verificado,
+                    "Dirección publicada en su web oficial (dark.fail) y comprobada abriéndola por Tor desde WoDW el 2026-10-07.",
+                ),
+                acceso(
+                    "tor.taxi",
+                    "Directorio antiphishing con las direcciones firmadas por cada sitio. Ojo: también lista mercados ilegales.",
+                    "http://tortaxi2dev6xjwbaydqzla77rrnth7yn2oqzjfmiuwn5h6vsk2a4syd.onion/",
+                    Fiabilidad::Verificado,
+                    "Dirección publicada en su web oficial (tor.taxi) y comprobada abriéndola por Tor desde WoDW el 2026-10-07.",
+                ),
+                acceso(
+                    "Tor Project",
+                    "Web oficial del Proyecto Tor.",
+                    "http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion/",
+                    Fiabilidad::Verificado,
+                    "Dirección recogida por dark.fail y tor.taxi y comprobada abriéndola por Tor desde WoDW el 2026-10-07.",
                 ),
             ],
         }

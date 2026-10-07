@@ -113,7 +113,7 @@ mod tests {
         assert!(c
             .resolver_entrada("c++ & rust")
             .unwrap()
-            .ends_with("omega?P=c%2B%2B+%26+rust"));
+            .ends_with("/html/?q=c%2B%2B+%26+rust"));
     }
 
     #[test]
